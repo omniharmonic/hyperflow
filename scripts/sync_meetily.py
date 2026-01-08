@@ -82,20 +82,35 @@ def get_meetily_db_path(custom_path: Optional[str] = None) -> Path:
         raise FileNotFoundError(f"MEETILY_DB_PATH not found: {env_path}")
     
     # 3. Auto-detect standard location
+    # Try multiple possible app identifiers (Meetily has used different ones)
     if sys.platform == 'darwin':
-        base = Path.home() / 'Library' / 'Application Support' / 'ai.meetily.app'
+        app_support = Path.home() / 'Library' / 'Application Support'
+        possible_dirs = [
+            'com.meetily.ai',      # Current version
+            'ai.meetily.app',      # Alternative
+            'meetily',             # Simple name
+            'com.meetily.app',     # Another variant
+        ]
     elif sys.platform == 'win32':
-        base = Path(os.environ.get('APPDATA', '')) / 'ai.meetily.app'
+        app_support = Path(os.environ.get('APPDATA', ''))
+        possible_dirs = ['com.meetily.ai', 'ai.meetily.app', 'meetily']
     else:
-        base = Path.home() / '.local' / 'share' / 'ai.meetily.app'
+        app_support = Path.home() / '.local' / 'share'
+        possible_dirs = ['com.meetily.ai', 'ai.meetily.app', 'meetily']
     
-    for name in ['meeting_minutes.sqlite', 'meeting_minutes.db']:
-        path = base / name
-        if path.exists():
-            return path
+    db_names = ['meeting_minutes.sqlite', 'meeting_minutes.db', 'meetily.db']
     
+    for dir_name in possible_dirs:
+        base = app_support / dir_name
+        for db_name in db_names:
+            path = base / db_name
+            if path.exists():
+                return path
+    
+    searched = [str(app_support / d) for d in possible_dirs]
     raise FileNotFoundError(
-        f"Meetily database not found at {base}\n"
+        f"Meetily database not found.\n"
+        f"Searched: {', '.join(searched)}\n\n"
         "Options:\n"
         "  1. Run Meetily at least once to create the database\n"
         "  2. Use --db /path/to/database.sqlite\n"
@@ -116,36 +131,81 @@ def sanitize_filename(title: str, max_length: int = 50) -> str:
 
 
 def parse_summary(result_json: str) -> Optional[Dict[str, Any]]:
-    """Parse summary JSON from database."""
+    """Parse summary JSON from database, handling various formats."""
     if not result_json:
         return None
     try:
+        # Handle double-encoded JSON
         data = json.loads(result_json)
-        return json.loads(data) if isinstance(data, str) else data
-    except (json.JSONDecodeError, TypeError):
+        if isinstance(data, str):
+            data = json.loads(data)
+        return data
+    except (json.JSONDecodeError, TypeError) as e:
+        print(f"  ⚠️ Summary parse warning: {e}")
         return None
 
 
 def format_summary_sections(summary: Dict[str, Any]) -> str:
-    """Format summary sections into markdown."""
+    """Format summary sections into markdown.
+    
+    Meetily stores summaries as {"markdown": "**Summary**\\n\\n..."}
+    We extract and clean up the markdown content.
+    """
+    # Check if summary has 'markdown' key (Meetily's current format)
+    if 'markdown' in summary:
+        markdown_content = summary['markdown']
+        
+        # Convert **Header** to ## Header for better Obsidian formatting
+        # and add checkboxes for action items
+        lines = []
+        in_action_items = False
+        
+        for line in markdown_content.split('\n'):
+            # Convert bold headers to markdown headers
+            if line.startswith('**') and line.endswith('**'):
+                header = line.strip('*')
+                lines.append(f'## {header}')
+                in_action_items = 'action' in header.lower()
+            elif line.strip().startswith('- ') and in_action_items:
+                # Add checkbox for action items
+                item = line.strip()[2:]  # Remove "- "
+                lines.append(f'- [ ] {item}')
+            elif line.strip().startswith('* ') and in_action_items:
+                # Handle bullet points too
+                item = line.strip()[2:]
+                lines.append(f'- [ ] {item}')
+            else:
+                if line.strip() and not line.strip().startswith(('**', '- ', '* ')):
+                    in_action_items = False
+                lines.append(line)
+        
+        return '\n'.join(lines)
+    
+    # Fallback: Handle structured formats (older Meetily versions or other sources)
     lines = []
-    sections = [
-        ('SessionSummary', 'Summary'),
-        ('KeyItemsDecisions', 'Key Decisions'),
-        ('ImmediateActionItems', 'Action Items'),
-        ('NextSteps', 'Next Steps'),
-        ('CriticalDeadlines', 'Deadlines'),
-        ('People', 'Participants'),
+    section_mappings = [
+        (['SessionSummary', 'Summary', 'summary'], 'Summary'),
+        (['KeyItemsDecisions', 'KeyDecisions', 'key_decisions'], 'Key Decisions'),
+        (['ImmediateActionItems', 'ActionItems', 'action_items'], 'Action Items'),
+        (['NextSteps', 'next_steps'], 'Next Steps'),
+        (['DiscussionHighlights', 'Discussion', 'highlights'], 'Discussion Highlights'),
     ]
     
-    for key, title in sections:
-        if key in summary and summary[key].get('blocks'):
-            lines.append(f'## {title}\n')
-            for block in summary[key]['blocks']:
-                content = block.get('content', str(block)) if isinstance(block, dict) else str(block)
-                prefix = '- [ ] ' if key == 'ImmediateActionItems' else '- '
-                lines.append(f'{prefix}{content}')
-            lines.append('')
+    for keys, title in section_mappings:
+        for key in keys:
+            if key in summary:
+                content = summary[key]
+                if isinstance(content, str) and content.strip():
+                    lines.append(f'## {title}\n')
+                    lines.append(content)
+                    lines.append('')
+                elif isinstance(content, list) and content:
+                    lines.append(f'## {title}\n')
+                    for item in content:
+                        prefix = '- [ ] ' if title == 'Action Items' else '- '
+                        lines.append(f'{prefix}{item}')
+                    lines.append('')
+                break
     
     return '\n'.join(lines)
 
@@ -158,7 +218,8 @@ def export_meeting(meeting: dict, transcripts: list, summary: Optional[dict], ex
     except ValueError:
         dt = datetime.now()
     
-    title = summary.get('MeetingName', meeting.get('title', 'Untitled')) if summary else meeting.get('title', 'Untitled')
+    # Prefer meeting title from DB (already set by Meetily), fallback to summary or 'Untitled'
+    title = meeting.get('title') or (summary.get('MeetingName') if summary else None) or 'Untitled'
     slug = sanitize_filename(title)
     filename = f"{dt.strftime('%Y-%m-%dT%H-%M')}_{slug}.md"
     filepath = export_dir / filename
@@ -265,6 +326,88 @@ def list_meetings(db_path_override: str = None):
     conn.close()
 
 
+def debug_database(db_path_override: str = None, meeting_id: str = None):
+    """Debug: Show database schema and sample data."""
+    db_path = get_meetily_db_path(db_path_override)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    print("\n" + "=" * 60)
+    print("DATABASE DEBUG INFO")
+    print("=" * 60)
+    print(f"\n📂 Database: {db_path}")
+    
+    # List all tables
+    print("\n📋 TABLES:")
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+    tables = [row['name'] for row in cursor.fetchall()]
+    for table in tables:
+        cursor.execute(f"SELECT COUNT(*) as count FROM {table}")
+        count = cursor.fetchone()['count']
+        print(f"  - {table} ({count} rows)")
+    
+    # Show schema for key tables
+    for table in ['meetings', 'transcripts', 'summary_processes', 'summaries']:
+        if table in tables:
+            print(f"\n📐 SCHEMA: {table}")
+            cursor.execute(f"PRAGMA table_info({table})")
+            for col in cursor.fetchall():
+                print(f"  - {col['name']} ({col['type']})")
+    
+    # Show sample summary data
+    print("\n📊 SUMMARY DATA CHECK:")
+    
+    # Check summary_processes table
+    if 'summary_processes' in tables:
+        cursor.execute("SELECT meeting_id, status, result FROM summary_processes LIMIT 3")
+        rows = cursor.fetchall()
+        print(f"\n  summary_processes table ({len(rows)} samples):")
+        for row in rows:
+            result_preview = str(row['result'])[:200] if row['result'] else 'NULL'
+            print(f"    meeting_id: {row['meeting_id'][:20]}...")
+            print(f"    status: {row['status']}")
+            print(f"    result: {result_preview}...")
+            print()
+    
+    # Check summaries table (alternative location)
+    if 'summaries' in tables:
+        cursor.execute("SELECT * FROM summaries LIMIT 3")
+        rows = cursor.fetchall()
+        print(f"\n  summaries table ({len(rows)} samples):")
+        for row in rows:
+            print(f"    {dict(row)}")
+    
+    # If specific meeting requested, show all its data
+    if meeting_id:
+        print(f"\n🔍 SPECIFIC MEETING: {meeting_id}")
+        
+        cursor.execute("SELECT * FROM meetings WHERE id = ?", (meeting_id,))
+        meeting = cursor.fetchone()
+        if meeting:
+            print(f"\n  Meeting data:")
+            for key in meeting.keys():
+                val = str(meeting[key])[:100] if meeting[key] else 'NULL'
+                print(f"    {key}: {val}")
+        
+        cursor.execute("SELECT COUNT(*) as count FROM transcripts WHERE meeting_id = ?", (meeting_id,))
+        print(f"\n  Transcript segments: {cursor.fetchone()['count']}")
+        
+        if 'summary_processes' in tables:
+            cursor.execute("SELECT * FROM summary_processes WHERE meeting_id = ?", (meeting_id,))
+            summary = cursor.fetchone()
+            if summary:
+                print(f"\n  Summary process:")
+                print(f"    status: {summary['status']}")
+                if summary['result']:
+                    print(f"    result (full):\n{summary['result']}")
+            else:
+                print(f"\n  No summary_processes entry found for this meeting")
+    
+    conn.close()
+    print("\n" + "=" * 60)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Sync Meetily meetings to Obsidian',
@@ -284,6 +427,7 @@ Examples:
     parser.add_argument('--all', '-a', action='store_true', help='Re-export all meetings')
     parser.add_argument('--meeting-id', '-m', type=str, help='Export specific meeting')
     parser.add_argument('--list', '-l', action='store_true', help='List meetings only')
+    parser.add_argument('--debug', '-d', action='store_true', help='Debug: show database schema and summary data')
     parser.add_argument('--vault', type=str, help='Vault path (default: auto-detect from HYPERFLOW_VAULT or script location)')
     parser.add_argument('--db', type=str, help='Meetily database path (default: auto-detect from MEETILY_DB_PATH or standard location)')
     args = parser.parse_args()
@@ -295,6 +439,10 @@ Examples:
     
     # Load .hyperflow.env if it exists
     load_env_file(vault_path)
+    
+    if args.debug:
+        debug_database(args.db, args.meeting_id)
+        return
     
     if args.list:
         list_meetings(args.db)

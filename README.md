@@ -109,16 +109,26 @@ Edit `my-project/PROJECT.md`:
 
 ### Daily Workflow
 
+**One Command (Recommended):**
+```
+/run-pipeline          ← Runs the entire workflow automatically
+```
+
+**Or Step-by-Step:**
 ```
 1. Record meetings in Meetily (normal usage)
 2. /sync-meetily       ← Pull new meetings into vault
 3. /ingest-meetings    ← Process and route to projects
+4. /sync-tasks         ← Push action items to person profiles
+5. /link-calendar      ← Attach to Google Calendar (optional)
+6. /send-followups     ← Email participants (optional)
 ```
 
 ### Command Reference
 
 | Command | What It Does |
 |---------|--------------|
+| `/run-pipeline` | **Master orchestrator** - runs the complete workflow automatically |
 | `/setup` | **Run first!** Finds Meetily DB, configures vault path |
 | `/sync-meetily` | Exports new meetings from Meetily's database to `_inbox/meetings/` |
 | `/sync-meetily --all` | Re-exports all meetings (fresh start) |
@@ -127,8 +137,11 @@ Edit `my-project/PROJECT.md`:
 | `/ingest-meetings` | Processes inbox, matches to projects, adds links |
 | `/ingest-meetings path/to/file.md` | Process a specific file |
 | `/add-project` | Interactive wizard to create a new project |
-| `/extract-actions path/to/meeting.md` | Extract action items |
-| `/send-followups path/to/meeting.md` | Generate follow-up emails |
+| `/sync-tasks` | Push action items from meetings to person profiles |
+| `/sync-notion` | Push tasks to Notion databases (requires Notion MCP + project config) |
+| `/link-calendar path/to/meeting.md` | Attach meeting notes to Google Calendar event (requires Calendar MCP) |
+| `/send-followups path/to/meeting.md` | Send follow-up emails with task reminders (requires Gmail MCP) |
+| `/send-followups --draft` | Create email drafts without sending |
 
 ---
 
@@ -245,6 +258,60 @@ Edit `.claude/skills/meeting-processor/SKILL.md`:
 1. Ensure `.claude/commands/` folder exists in vault root
 2. Check file has correct frontmatter with `---` delimiters
 3. Restart Claude Code session
+
+---
+
+## MCP Integrations (Optional)
+
+Hyperflow can integrate with external services via Claude Code's Model Context Protocol (MCP):
+
+### Notion
+
+Push action items to Notion task databases.
+
+**Setup:**
+1. Install the Notion MCP server
+2. Configure OAuth credentials
+3. Add to each project's `PROJECT.md`:
+   ```yaml
+   notion_workspace: "Your Workspace"
+   notion_tasks_database: "database-id-from-url"
+   ```
+4. Use `/sync-notion` or let `/run-pipeline` handle it automatically
+
+**What it does:**
+- Creates tasks in project-specific Notion databases
+- Links back to source meeting
+- Includes assignee, due date, status
+- Avoids duplicates
+
+### Google Calendar
+
+Link meeting notes to calendar events automatically.
+
+**Setup:**
+1. Install the Google Calendar MCP server
+2. Configure OAuth credentials
+3. Use `/link-calendar` to attach notes to events
+
+**What it does:**
+- Finds calendar events matching meeting date/time
+- Adds meeting summary to event description
+- Links notes back to calendar
+
+### Gmail
+
+Send follow-up emails with action items to participants.
+
+**Setup:**
+1. Install the Gmail MCP server
+2. Configure OAuth credentials
+3. Use `/send-followups` to email participants
+
+**What it does:**
+- Generates personalized emails per participant
+- Includes their assigned action items
+- Can save as drafts or send directly
 
 ---
 

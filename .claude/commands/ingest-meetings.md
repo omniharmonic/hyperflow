@@ -1,117 +1,361 @@
 ---
-description: Process new meeting transcripts from inbox, enrich with metadata, and route to correct project folders
+description: Process pending meetings from inbox - extract entities, create wiki links, generate summaries, route to projects
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 argument-hint: [optional: specific file to process]
 ---
 
-# Meeting Ingestion Workflow
+# Ingest Meetings
 
-Process all markdown files in `_inbox/meetings/` that have `status: pending_enrichment` in their frontmatter.
+Process all markdown files in `_inbox/meetings/` with `status: pending_enrichment`.
 
-## Pre-Processing Check
+## Overview
 
-1. List all files in `_inbox/meetings/` using Glob
-2. Filter for `.md` files with pending status
-3. If `$ARGUMENTS` provided, process only that specific file
-4. If no files found, inform user and exit
+This command transforms raw meeting transcripts into rich, interconnected knowledge base entries by:
+1. Extracting and creating entity files (people, concepts, organizations)
+2. Generating summaries if missing
+3. Adding wiki-links throughout the content
+4. Routing to the appropriate project folder
 
-## For Each File, Execute These Steps
+---
 
-### Step 1: Read and Parse
+## Workflow
 
-Read the meeting file and extract:
-- Full transcript content
-- Summary (if present)
-- Any existing frontmatter metadata
-- Meeting date and duration
+### Step 1: Find Pending Files
+
+```bash
+ls _inbox/meetings/*.md
+```
+
+Check each file's frontmatter for `status: pending_enrichment`.
+If `$ARGUMENTS` provided, process only that specific file.
 
 ### Step 2: Load Project Context
 
-Read all `PROJECT.md` files from `projects/*/PROJECT.md` to build context:
+Read all `projects/*/PROJECT.md` files to build matching context:
 - Project names and aliases
 - Team member names and emails
-- Keywords associated with each project
-- Notion workspace IDs for later action item routing
+- Keywords for matching
 
-### Step 3: Project Matching
+### Step 3: For Each Pending Meeting
 
-Analyze transcript content to determine project association:
-
-**Matching signals (in priority order):**
-1. Direct project name mention (e.g., "OpenCivics", "TrustGraph")
-2. Project aliases from PROJECT.md `aliases` field
-3. Team member names matching `team` entries in any PROJECT.md
-4. Keyword density matching `keywords` arrays
-
-**Decision logic:**
-- If single strong match (>3 signals): assign to that project
-- If multiple matches: assign to highest signal count, note others in metadata
-- If no match: route to `meetings/[YYYY-MM-DD]/` general folder
-
-### Step 4: Metadata Enrichment
-
-Update the frontmatter with:
-
-```yaml
 ---
-title: "[Cleaned title from content or filename]"
-date: [ISO timestamp]
-duration: [minutes if available]
-status: processed
-project: "[[projects/[matched-project]/index]]"
-participants:
-  - "[[people/Person Name]]"
-themes:
-  - theme-one
-  - theme-two
+
+## Entity Extraction (CRITICAL)
+
+Analyze the transcript and identify ALL entities:
+
+### People
+- Names mentioned in speech
+- Email addresses referenced
+- Speakers in the conversation
+- Anyone assigned action items
+
+### Organizations
+- Companies mentioned
+- Institutions referenced
+- Partner organizations
+
+### Concepts
+- Technical terms discussed
+- Methodologies mentioned
+- Frameworks referenced
+- Domain-specific terminology
+
+### Tools/Platforms
+- Software tools discussed
+- Platforms mentioned
+- Services referenced
+
+**Output a list of all extracted entities with their type.**
+
+---
+
+## Entity File Creation
+
+### For Each Person
+
+Check if `people/{Name}.md` exists. If not, create:
+
+```markdown
+---
+name: "{Full Name}"
+type: person
+email: "{if known}"
+organization: "{if mentioned}"
+role: "{if mentioned}"
+first_seen: {meeting date}
 tags:
-  - meeting
-  - [project-slug]
-  - [primary-theme]
-processed_at: [current ISO timestamp]
+  - person
 ---
+
+# {Full Name}
+
+First encountered in: [[{path to this meeting}]]
+
+## Context
+
+{Brief note about how they were mentioned}
+
+## Meetings
+
+<!-- Dataview query will show related meetings -->
+
+## Notes
+
+<!-- Add more context as you learn about this person -->
 ```
 
-### Step 5: Wiki-Linking
+### For Each Concept
 
-Scan the content for linkable concepts:
+Check if `concepts/{Concept}.md` exists. If not, create:
 
-**Auto-link:**
-- People mentioned → `[[people/Person Name]]`
-- Projects mentioned → `[[projects/project-name/index]]`
-- Known concepts in vault (check existing files)
-- Tools/platforms discussed (if notes exist)
+```markdown
+---
+name: "{Concept Name}"
+type: concept
+aliases:
+  - "{any alternative names}"
+first_seen: {meeting date}
+tags:
+  - concept
+---
 
-**Linking rules:**
-- Only link first occurrence of each term
-- Don't over-link (max ~10 links per document)
-- Preserve original text, wrap with brackets
+# {Concept Name}
 
-### Step 6: Create Missing Notes
+First encountered in: [[{path to this meeting}]]
 
-For each participant not already in `people/`:
-- Create stub file: `people/[Name].md`
-- Frontmatter: `name`, `first_seen` (meeting date)
-- Add TODO comment to fill in details
+## Definition
 
-### Step 7: File Placement
+{Brief definition based on meeting context, or leave as TODO}
 
-Move the enriched file to target location:
-- **If project matched:** `projects/[project-name]/meetings/[filename].md`
-- **If no match:** `meetings/[YYYY-MM-DD]/[filename].md`
+## Related
 
-### Step 8: Cleanup
+- [[other related concepts if known]]
 
-- Remove original from `_inbox/meetings/`
-- Log processing result
+## Mentions
 
-## Post-Processing Report
+<!-- Meetings where this concept appears -->
+```
 
-After processing all files, output summary:
-- Number of files processed
-- Project assignments made
-- New people notes created
-- Any files that couldn't be processed (with reason)
+### For Each Organization
+
+Check if `organizations/{Org}.md` exists (create folder if needed). If not, create:
+
+```markdown
+---
+name: "{Organization Name}"
+type: organization
+website: "{if mentioned}"
+first_seen: {meeting date}
+tags:
+  - organization
+---
+
+# {Organization Name}
+
+First encountered in: [[{path to this meeting}]]
+
+## About
+
+{Brief description based on context}
+
+## People
+
+- [[people who work here if mentioned]]
+
+## Mentions
+
+<!-- Meetings where this org appears -->
+```
+
+---
+
+## Meeting File Enrichment
+
+Transform the meeting file to have this structure:
+
+```markdown
+---
+title: "{Cleaned descriptive title}"
+date: {ISO timestamp}
+duration: {minutes if known}
+status: processed
+source: meetily
+project: "[[projects/{matched}/index]]"
+participants:
+  - "[[people/Person One]]"
+  - "[[people/Person Two]]"
+themes:
+  - {theme-1}
+  - {theme-2}
+tags:
+  - meeting
+  - {project-slug}
+processed_at: {current ISO timestamp}
+confidence: {high|medium|low}
+---
+
+# {Meeting Title}
+
+> **Project:** [[projects/{project}/index]]
+> **Date:** {formatted date}
+> **Participants:** [[people/Person One]], [[people/Person Two]]
+
+## Summary
+
+{2-3 paragraph summary of the meeting. If Meetily provided a summary, use that. Otherwise, generate from transcript.}
+
+## Key Insights
+
+- {Most important insight or decision}
+- {Second key insight}
+- {Third key insight}
+
+## Action Items
+
+- [ ] {Action item 1} - @[[people/Assignee]] (due: {date if mentioned})
+- [ ] {Action item 2} - @[[people/Assignee]]
+- [ ] {Action item 3}
+
+## Decisions Made
+
+- {Decision 1 and its context}
+- {Decision 2}
+
+## Topics Discussed
+
+### {Topic 1}
+
+{Brief summary of discussion around this topic, with [[wiki-links]] to relevant concepts}
+
+### {Topic 2}
+
+{Brief summary}
+
+## Next Steps
+
+- {Next step 1}
+- {Next step 2}
+
+---
+
+## Full Transcript
+
+{Original transcript with wiki-links added for first occurrences of:
+- People → [[people/Name]]
+- Projects → [[projects/slug/index]]  
+- Concepts → [[concepts/Term]]
+- Organizations → [[organizations/Name]]
+}
+```
+
+---
+
+## Wiki-Linking Rules
+
+### What to Link
+- **People:** First mention of each person → `[[people/Full Name]]`
+- **Projects:** Project names/aliases → `[[projects/slug/index|Display Name]]`
+- **Concepts:** Technical terms, methodologies → `[[concepts/Term]]`
+- **Organizations:** Companies, institutions → `[[organizations/Name]]`
+
+### Linking Guidelines
+- Link first occurrence only (don't over-link)
+- Maximum 15-20 links per document
+- Don't link common words or obvious terms
+- Preserve original text in display: `[[people/Benjamin Life|Benjamin]]`
+- Skip linking inside code blocks or quotes
+
+---
+
+## Project Matching
+
+Score each project based on content:
+
+| Signal | Weight |
+|--------|--------|
+| Project name in content | +5 |
+| Project alias mentioned | +4 |
+| Team member name found | +3 |
+| Project keyword found | +2 |
+
+**Thresholds:**
+- ≥8 points: Strong match → `projects/[name]/meetings/`
+- 4-7 points: Moderate match → same, add confidence note
+- <4 points: No match → `meetings/YYYY-MM-DD/`
+
+---
+
+## File Placement
+
+After enrichment, move the file:
+
+**If project matched:**
+```
+projects/{project-slug}/meetings/YYYY-MM-DD_{descriptive-slug}.md
+```
+
+**If no match:**
+```
+meetings/YYYY-MM-DD/{descriptive-slug}.md
+```
+
+---
+
+## Quality Checklist
+
+Before marking complete, verify:
+- [ ] Summary section is populated
+- [ ] Key Insights has 2-5 items
+- [ ] Action Items extracted (if any mentioned)
+- [ ] All participants have wiki-links
+- [ ] Person files created for new people
+- [ ] Concept files created for key terms
+- [ ] Project correctly matched (or placed in general)
+- [ ] File moved to destination folder
+- [ ] Status updated to `processed`
+
+---
+
+## Example Output
+
+After processing `2024-01-08T06-15_untitled.md`:
+
+**Created files:**
+```
+✅ people/Sarah Chen.md (new)
+✅ people/Marcus Johnson.md (new)
+✅ concepts/Pattern Language.md (new)
+✅ concepts/Theory of Change.md (new)
+✅ organizations/Localism Fund.md (new)
+```
+
+**Moved:**
+```
+_inbox/meetings/2024-01-08T06-15_untitled.md
+  → projects/opencivics/meetings/2024-01-08_theory-of-change-planning.md
+```
+
+**Summary:**
+```
+Processed: 1 meeting
+Project: OpenCivics (confidence: high, score: 12)
+Entities created: 3 people, 2 concepts, 1 organization
+Wiki-links added: 14
+```
+
+---
+
+## Step 10: Suggest Task Sync
+
+If action items were found during processing:
+
+```
+→ Found {N} action items assigned to {M} people.
+→ Run /sync-tasks to add them to person profiles.
+```
+
+---
 
 ## Error Handling
 

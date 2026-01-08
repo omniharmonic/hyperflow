@@ -53,7 +53,18 @@ Ask:
 > - Documentation URL:
 > - Shared Drive URL:
 
-### Step 6: Create Project Structure
+### Step 6: Notion Integration (Optional)
+
+Ask:
+> **Set up Notion task sync?** (optional, press Enter to skip)
+> 
+> If yes:
+> - Notion Workspace Name:
+> - Notion Tasks Database ID: (find in database URL)
+> 
+> Example database ID: `abc123def456` from URL `notion.so/workspace/abc123def456`
+
+### Step 7: Create Project Structure
 
 Create the following files:
 
@@ -67,6 +78,9 @@ aliases:
 status: active
 tags:
   - project
+# Notion Integration (if configured)
+notion_workspace: "{workspace name or empty}"
+notion_tasks_database: "{database id or empty}"
 ---
 
 # {Project Name}

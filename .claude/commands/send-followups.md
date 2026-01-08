@@ -1,189 +1,269 @@
 ---
-description: Generate personalized follow-up emails for meeting participants with their action items
-allowed-tools: Read, Write, Grep, Glob
-argument-hint: [path to meeting note or 'recent' for latest]
+description: Send follow-up emails with task reminders to meeting participants using Gmail MCP
+allowed-tools: Read, Write, Glob, Grep, mcp__gmail__send-email, mcp__gmail__create-draft, mcp__gmail__list-drafts
+argument-hint: [path/to/meeting.md]
 ---
 
-# Follow-up Email Generation Workflow
+# Send Follow-up Emails
 
-Generate personalized follow-up emails for each meeting participant, summarizing the discussion and highlighting their specific action items.
+Generate and send follow-up emails to meeting participants with their assigned action items.
 
-## Invocation
+## Prerequisites
 
+- Gmail MCP server must be configured in Claude Code
+- Meeting file must have `participants` in frontmatter
+- Person files should have email addresses
+
+---
+
+## Workflow
+
+### Step 1: Read Meeting File
+
+Read the specified meeting file and extract:
+- Meeting title
+- Meeting date
+- Summary
+- Action items (with assignees)
+- Participants
+- Key decisions
+
+### Step 2: Get Participant Emails
+
+For each participant in the meeting:
+1. Read their person file (`people/{Name}.md`)
+2. Extract email address from frontmatter
+3. Collect their assigned action items
+
+### Step 3: Generate Personalized Emails
+
+For each participant with action items, generate a personalized email:
+
+**Email Template:**
 ```
-/send-followups recent
-/send-followups projects/opencivics/meetings/2026-01-07-sync.md
-```
+Subject: Follow-up: {Meeting Title} - Action Items
 
-## Step 1: Load Meeting Content
+Hi {First Name},
 
-- Read the specified meeting note
-- Extract: title, date, summary, action items, participants
-- Load PROJECT.md for team contact information
+Thanks for joining the {Meeting Title} on {Meeting Date}.
 
-## Step 2: Identify Recipients
+Here's a summary of what we discussed and your action items:
 
-From meeting participants list:
-1. Look up each person in `people/[name].md` for email
-2. Check PROJECT.md team section for email
-3. If email not found, note for user to fill in
-
-Create recipient list:
-```yaml
-recipients:
-  - name: Benjamin
-    email: benjamin@example.org
-    actions: [list of their action items]
-  - name: Sarah
-    email: sarah@example.org  
-    actions: [list of their action items]
-```
-
-## Step 3: Generate Email Drafts
-
-For each recipient, generate personalized email:
-
-### Email Template
-
-**Subject:** Follow-up: [Meeting Title] - [Date]
-
-```markdown
-Hi [First Name],
-
-Thanks for joining today's [meeting type] on [topic]. Here's a quick summary and your action items.
-
-## Meeting Summary
-
-[2-3 sentence summary of key discussion points and decisions]
+## Summary
+{2-3 sentence meeting summary}
 
 ## Your Action Items
+- [ ] {Task 1} - Due: {date}
+- [ ] {Task 2} - Due: {date}
 
-[If they have action items:]
-Based on our discussion, here's what you committed to:
+## Key Decisions
+- {Decision 1}
+- {Decision 2}
 
-- [ ] [Action item 1] [by deadline if specified]
-- [ ] [Action item 2]
+## Full Meeting Notes
+{Link to Obsidian note or summary}
 
-[If no action items:]
-No specific action items were assigned to you in this meeting.
+Let me know if you have any questions!
 
-## Team Action Items
-
-For visibility, here's what others are working on:
-
-- **[Other Person]**: [Their action item summary]
-
-## Next Steps
-
-[Any scheduled follow-ups, next meeting, or general next steps]
-
----
-
-Let me know if I missed anything or if you have questions!
-
-[Sender signature block]
+Best,
+{Sender name}
 ```
 
-### Personalization Rules
+### Step 4: Review Before Sending
 
-- Use first name in greeting
-- Only include their action items prominently
-- Summarize (don't list all) others' items
-- Match tone to relationship (formal for external, casual for team)
-
-## Step 4: Save Drafts
-
-Create draft files in a staging location:
+Show the user a preview of each email:
 
 ```
-_drafts/followups/[meeting-date]/
-├── email-benjamin.md
-├── email-sarah.md
-└── summary.md  # Overview of all drafts
+📧 Email Preview (1 of 3)
+
+To: patricia@opencivics.co
+Subject: Follow-up: Open Civics Launch Strategy - Action Items
+
+Hi Patricia,
+
+Thanks for joining the Open Civics Launch Strategy meeting on January 8, 2026.
+
+Your Action Items:
+- [ ] Complete the membership onboarding page - Due: Tuesday
+
+[Full email preview...]
+
+Options:
+- [S]end now
+- [D]raft (save to Gmail drafts)
+- [E]dit subject/body
+- [N]ext (skip this email)
+- [A]bort all
+
+Choice:
 ```
 
-Each email file format:
-```markdown
----
-to: email@example.org
-subject: Follow-up: [Meeting Title] - [Date]
-status: draft
-meeting: "[[path/to/meeting-note]]"
----
+### Step 5: Send or Draft
 
-[Email body]
+Based on user choice:
+
+**Send immediately:**
+```
+mcp__gmail__send-email
+- to: {recipient email}
+- subject: {subject}
+- body: {email body}
 ```
 
-## Step 5: Summary Output
-
-Present summary to user:
-
-```markdown
-## Follow-up Emails Generated
-
-Meeting: [Title] on [Date]
-
-### Ready to Send
-| Recipient | Email | Action Items |
-|-----------|-------|--------------|
-| Benjamin | benjamin@example.org | 2 items |
-| Sarah | sarah@example.org | 1 item |
-
-### Missing Contact Info
-- [Name] - email not found (check people/ or PROJECT.md)
-
-### Draft Location
-Files saved to: `_drafts/followups/2026-01-07/`
-
-### Next Steps
-1. Review drafts in the folder above
-2. Fill in missing emails
-3. Copy content to your email client
-4. Send!
+**Save as draft:**
+```
+mcp__gmail__create-draft
+- to: {recipient email}
+- subject: {subject}
+- body: {email body}
 ```
 
-## Step 6: Cleanup Options
+### Step 6: Update Meeting File
 
-After user confirms emails sent:
-- Move drafts to `_archive/sent-followups/`
-- Update meeting note with "follow-ups sent" status
-
-## Customization
-
-### Tone Settings
-
-In CLAUDE.md or settings, user can specify:
+After sending, add to meeting frontmatter:
 ```yaml
-email_defaults:
-  tone: professional | casual | formal
-  signature: |
-    Best,
-    [Name]
-  include_team_items: true | false
+followups_sent:
+  - email: patricia@opencivics.co
+    sent_at: 2026-01-08T10:30:00
+    status: sent
+  - email: spencer@opencivics.co
+    sent_at: 2026-01-08T10:30:00
+    status: draft
 ```
 
-### Template Override
+---
 
-User can create custom template at:
-`_templates/followup-email.md`
+## Email Types
 
-## Error Handling
+### 1. Action Item Reminder (Default)
+Personalized email with just that person's action items.
 
-### Missing Emails
-- Generate draft without "to:" field
-- Flag in summary for user to fill in
+### 2. Full Summary (`--summary`)
+Same email to all participants with full meeting summary and all action items.
 
-### No Action Items
-- Still generate thank-you email
-- Focus on summary and next steps
+### 3. Due Date Reminder (`--reminder`)
+For tasks approaching their due date:
+```
+Subject: Reminder: Task due {tomorrow/today}
 
-### Large Meetings
-- If >10 participants, ask user which to include
-- Option to generate "all hands" version for large groups
+Hi {Name},
 
-## Notes
+Just a friendly reminder that this task is due {when}:
 
-- Emails are drafts only - user must send manually
-- Consider privacy: don't include sensitive details
-- Keep summaries concise - busy people skim
-- Action items should be clear and actionable
+- {Task description}
+
+From meeting: {Meeting Title} ({Date})
+
+Let me know if you need any help!
+```
+
+---
+
+## Example Session
+
+```
+User: /send-followups projects/opencivics/meetings/2026-01-08_launch-strategy-website-updates.md
+
+Claude: 📧 Preparing follow-up emails for "Open Civics Launch Strategy"
+
+Found 1 participant with action items:
+- Patricia Parkinson (patricia@opencivics.co): 1 task
+
+Generating email for Patricia...
+
+📧 Email Preview:
+
+To: patricia@opencivics.co
+Subject: Follow-up: Open Civics Launch Strategy - Action Items
+
+Hi Patricia,
+
+Thanks for joining the Open Civics Launch Strategy meeting on January 8th.
+
+## Your Action Items
+- [ ] Complete the membership onboarding page - Due: Tuesday
+
+## Summary
+The meeting focused on launch preparation and website updates needed for the 
+OpenCivics launch. The main focus was on the membership onboarding page.
+
+Let me know if you have any questions!
+
+---
+
+[S]end / [D]raft / [E]dit / [N]ext / [A]bort?
+
+User: d
+
+Claude: ✅ Draft saved to Gmail
+
+Summary:
+- 1 email drafted
+- 0 emails sent
+
+Drafts can be reviewed in Gmail before sending.
+```
+
+---
+
+## Batch Follow-ups
+
+Send follow-ups for multiple meetings:
+
+```
+/send-followups --batch --since 2026-01-01
+```
+
+This will:
+1. Find all meetings since the date without `followups_sent`
+2. Generate emails for each
+3. Show summary before sending/drafting
+
+---
+
+## Options
+
+| Flag | Description |
+|------|-------------|
+| `--draft` | Save all as drafts, don't send |
+| `--summary` | Send full summary to all participants |
+| `--reminder` | Send due date reminders for upcoming tasks |
+| `--batch` | Process multiple meetings |
+| `--since DATE` | Only meetings after this date |
+
+---
+
+## Finding Missing Emails
+
+If a participant doesn't have an email address:
+
+```
+⚠️ Missing email for: Spencer Cavanaugh
+
+Options:
+1. Enter email address now (will save to person file)
+2. Skip this participant
+3. Abort
+
+Choice:
+```
+
+If user enters email, update the person file:
+```yaml
+email: spencer@opencivics.co
+```
+
+---
+
+## Troubleshooting
+
+### "Gmail MCP not available"
+Ensure the Gmail MCP server is configured in Claude Code settings.
+
+### "Send failed"
+- Check Gmail OAuth permissions
+- Verify recipient email is valid
+- Check for sending limits
+
+### "No action items found"
+The meeting may not have action items extracted. Run `/ingest-meetings` first.
