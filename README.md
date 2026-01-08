@@ -30,14 +30,15 @@ Hyperflow is an open-source, AI-powered meeting intelligence system that transfo
 │                         YOUR MEETING                             │
 └─────────────────────────────────────────────────────────────────┘
                               │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  MEETILY (Local Transcription)                                   │
-│  ├─ Records system audio + microphone                           │
-│  ├─ Runs Whisper/Ollama locally — no API costs                  │
-│  └─ Stores transcripts in SQLite                                │
-└─────────────────────────────────────────────────────────────────┘
-                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+┌───────────────────┐ ┌───────────────┐ ┌───────────────┐
+│  MEETILY (Local)  │ │    FATHOM     │ │     OTTER     │
+│  └─ /sync-meetily │ │  └─ Export →  │ │  └─ Export →  │
+│                   │ │    _inbox/    │ │    _inbox/    │
+└───────────────────┘ └───────────────┘ └───────────────┘
+              │               │               │
+              └───────────────┼───────────────┘
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  HYPERFLOW + CLAUDE CODE (AI Orchestration)                      │
@@ -80,6 +81,13 @@ Hyperflow is an open-source, AI-powered meeting intelligence system that transfo
 - **Event Matching**: Finds the calendar event that corresponds to your meeting
 - **Note Attachment**: Adds meeting summary and action items to calendar event description
 - **Bidirectional Linking**: Meeting notes link to calendar; calendar links to notes
+
+### Multi-Source Support
+
+- **Meetily**: Auto-sync from local SQLite database
+- **Fathom**: Export and drop into inbox with template
+- **Otter**: Export TXT and drop into inbox
+- **Manual**: Paste any transcript or notes, AI generates the rest
 
 ### Privacy-First Design
 
@@ -204,6 +212,13 @@ hyperflow/
 │   ├── sync_meetily.py    # Python script for database export
 │   ├── integrations.py    # Unified API client (Notion, Gmail, Calendar)
 │   └── setup_google.py    # Google OAuth setup wizard
+├── _templates/
+│   ├── meeting-note.md    # General meeting template
+│   ├── fathom-import.md   # Template for Fathom exports
+│   ├── otter-import.md    # Template for Otter exports
+│   ├── quick-meeting.md   # Minimal template for fast drops
+│   ├── person.md          # Person profile template
+│   └── ...
 ├── _inbox/
 │   └── meetings/          # Raw meetings land here for processing
 ├── _drafts/

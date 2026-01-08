@@ -4,12 +4,25 @@ Auto-invoked context when working with meeting files or the `_inbox/meetings/` d
 
 ---
 
+## Supported Sources
+
+| Source | Detection Pattern | Summary Handling |
+|--------|------------------|------------------|
+| **Meetily** | `source: meetily` or timestamps like `[00:15:23]` | Use existing if present |
+| **Fathom** | `source: fathom` or `Speaker (HH:MM:SS)` format | Preserve Fathom's summary |
+| **Otter** | `source: otter` or `Speaker N  M:SS` format | Preserve Otter's summary |
+| **Manual** | No patterns matched or `source: manual` | Generate from content |
+| **Plain text** | `.txt` file or no frontmatter | Generate everything |
+
+---
+
 ## Core Principles
 
 1. **Preserve original content** - Never delete transcript text
 2. **Enrich, don't replace** - Add structure and links around content
 3. **Create connections** - Every entity should be linkable
-4. **Generate missing summaries** - If Meetily didn't provide one, create it
+4. **Use existing summaries** - If source provided one, use it (Fathom, Otter, Meetily)
+5. **Generate when missing** - Create summary/action items only if not present
 
 ---
 
@@ -112,7 +125,8 @@ title: "{Descriptive Title}"
 date: {ISO timestamp}
 duration: {minutes}
 status: processed
-source: meetily
+source: {meetily|fathom|otter|manual}
+original_file: "{original filename if renamed}"
 project: "[[projects/slug/index]]"
 participants:
   - "[[people/Person One]]"
@@ -302,7 +316,19 @@ Format: `YYYY-MM-DD_{descriptive-slug}.md`
 
 ## Summary Generation
 
-If no summary from Meetily, generate one covering:
+### When to Generate vs. Preserve
+
+| Scenario | Action |
+|----------|--------|
+| Meetily file with summary | Use existing, light editing OK |
+| Fathom export with summary | Preserve Fathom's summary exactly |
+| Otter export with summary | Preserve Otter's summary exactly |
+| Any source missing summary | Generate new summary |
+| Manual/plain text drop | Always generate |
+
+### Generation Guidelines
+
+If generating a new summary, cover:
 
 1. **Context** - What was the meeting about?
 2. **Key Points** - Main topics discussed
@@ -310,6 +336,20 @@ If no summary from Meetily, generate one covering:
 4. **Next Steps** - What happens after this meeting?
 
 Target length: 150-300 words
+
+### Action Item Extraction
+
+| Source | Approach |
+|--------|----------|
+| Fathom | Look for "Action Items" section, use as-is |
+| Otter | Check for extracted action items |
+| Meetily | Parse from summary or transcript |
+| Manual | Search for patterns: "will do", "action:", "TODO", "@name to..." |
+
+Always normalize to checkbox format:
+```markdown
+- [ ] Task description - @[[people/Assignee]] (due: date)
+```
 
 ---
 

@@ -6,15 +6,28 @@ argument-hint: [optional: specific file to process]
 
 # Ingest Meetings
 
-Process all markdown files in `_inbox/meetings/` with `status: pending_enrichment`.
+Process all markdown files in `_inbox/meetings/` — works with Meetily exports, Fathom, Otter, or manual notes.
 
 ## Overview
 
 This command transforms raw meeting transcripts into rich, interconnected knowledge base entries by:
-1. Extracting and creating entity files (people, concepts, organizations)
-2. Generating summaries if missing
-3. Adding wiki-links throughout the content
-4. Routing to the appropriate project folder
+1. Auto-detecting the source format (Meetily, Fathom, Otter, manual)
+2. Extracting and creating entity files (people, concepts, organizations)
+3. Generating or using existing summaries
+4. Adding wiki-links throughout the content
+5. Routing to the appropriate project folder
+
+---
+
+## Supported Sources
+
+| Source | How to Add | What to Expect |
+|--------|-----------|----------------|
+| **Meetily** | `/sync-meetily` | Full transcript + AI summary |
+| **Fathom** | Export → paste into `_templates/fathom-import.md` | Transcript + summary + action items |
+| **Otter** | Export TXT → paste into `_templates/otter-import.md` | Transcript + summary + outline |
+| **Manual** | Create file or use `_templates/quick-meeting.md` | Generate everything from transcript |
+| **Plain text** | Drop `.txt` file in `_inbox/meetings/` | Auto-convert and process |
 
 ---
 
@@ -23,11 +36,31 @@ This command transforms raw meeting transcripts into rich, interconnected knowle
 ### Step 1: Find Pending Files
 
 ```bash
-ls _inbox/meetings/*.md
+ls _inbox/meetings/*.md _inbox/meetings/*.txt 2>/dev/null
 ```
 
-Check each file's frontmatter for `status: pending_enrichment`.
+Process files that:
+- Have `status: pending_enrichment` in frontmatter, OR
+- Have no frontmatter (plain text drop), OR
+- Have `status:` missing (assume pending)
+
 If `$ARGUMENTS` provided, process only that specific file.
+
+### Step 1b: Auto-Detect Source Format
+
+For each file, detect the source by checking:
+
+1. **Frontmatter `source:` field** - explicit declaration
+2. **Content patterns:**
+   - Meetily: `"result_json"`, timestamps like `00:15:23`
+   - Fathom: `Speaker Name (HH:MM:SS)` format, "Key Points" section
+   - Otter: `Speaker N  M:SS` format, "Outline" section
+   - Manual: No recognized patterns → treat as general notes
+
+3. **File extension:**
+   - `.txt` files → convert to markdown, treat as manual
+   
+**Set `detected_source` for use in later steps.**
 
 ### Step 2: Load Project Context
 
@@ -36,7 +69,37 @@ Read all `projects/*/PROJECT.md` files to build matching context:
 - Team member names and emails
 - Keywords for matching
 
-### Step 3: For Each Pending Meeting
+### Step 3: Normalize Source Format
+
+Before processing, normalize the content based on detected source:
+
+#### Meetily Format
+- Summary usually in frontmatter or `## Summary` section
+- Transcript has timestamps: `[00:15:23] Speaker: Text`
+- Action items may be pre-extracted
+- **Use existing summary if present**
+
+#### Fathom Format
+- Look for summary at top of content
+- Transcript format: `Speaker Name (00:00:00)\nText...`
+- Key Points section often present
+- Action items often pre-extracted
+- **Preserve Fathom's summary and action items**
+
+#### Otter Format
+- Summary usually at the very top
+- Transcript format: `Speaker 1  0:00\nText...`
+- May have Outline/Chapters section
+- Action items sometimes extracted
+- **Preserve Otter's summary if present**
+
+#### Manual / Plain Text
+- No structured sections expected
+- May be raw meeting notes or pasted transcript
+- **Generate summary from content**
+- **Extract action items from text patterns**
+
+### Step 4: For Each Pending Meeting
 
 ---
 
@@ -180,7 +243,8 @@ title: "{Cleaned descriptive title}"
 date: {ISO timestamp}
 duration: {minutes if known}
 status: processed
-source: meetily
+source: {meetily|fathom|otter|manual}
+original_source: "{keep original if provided}"
 project: "[[projects/{matched}/index]]"
 participants:
   - "[[people/Person One]]"
@@ -191,6 +255,7 @@ themes:
 tags:
   - meeting
   - {project-slug}
+  - {source}
 processed_at: {current ISO timestamp}
 confidence: {high|medium|low}
 ---
@@ -203,7 +268,12 @@ confidence: {high|medium|low}
 
 ## Summary
 
-{2-3 paragraph summary of the meeting. If Meetily provided a summary, use that. Otherwise, generate from transcript.}
+{2-3 paragraph summary of the meeting.
+
+**Source-specific handling:**
+- **Meetily/Fathom/Otter with existing summary:** Use and lightly edit for consistency
+- **Manual/plain text:** Generate comprehensive summary from content
+- **Always include:** Main topic, key outcomes, notable discussions}
 
 ## Key Insights
 
@@ -213,6 +283,14 @@ confidence: {high|medium|low}
 
 ## Action Items
 
+{Extract action items with assignees and due dates.
+
+**Source-specific handling:**
+- **Fathom/Otter with action items:** Use their extracted items, normalize format
+- **Meetily:** Check for action items in summary or transcript
+- **Manual:** Search for patterns like "will do", "action:", "TODO:", "@name to..."
+
+**Format:**}
 - [ ] {Action item 1} - @[[people/Assignee]] (due: {date if mentioned})
 - [ ] {Action item 2} - @[[people/Assignee]]
 - [ ] {Action item 3}
@@ -365,3 +443,65 @@ If any step fails:
 3. Add `error_message` to frontmatter
 4. Continue with next file
 5. Report errors in final summary
+
+---
+
+## Quick Reference: Adding Meetings Manually
+
+### Option 1: Quick Drop (Fastest)
+```bash
+# Create file directly
+cat > _inbox/meetings/my-meeting.md << 'EOF'
+---
+date: 2024-01-15T14:00
+status: pending_enrichment
+---
+
+[Paste your transcript or notes here]
+EOF
+```
+
+### Option 2: Use Templates
+```bash
+# Copy appropriate template
+cp _templates/fathom-import.md _inbox/meetings/client-call.md
+cp _templates/otter-import.md _inbox/meetings/team-sync.md
+cp _templates/quick-meeting.md _inbox/meetings/quick-notes.md
+```
+
+### Option 3: Plain Text Drop
+```bash
+# Just drop a .txt file - will auto-convert
+mv ~/Downloads/meeting-transcript.txt _inbox/meetings/
+```
+
+### Then Process
+```
+/ingest-meetings
+```
+
+---
+
+## Tips for Each Source
+
+### Fathom
+1. After your meeting, go to Fathom dashboard
+2. Click on the meeting → "Summary" tab
+3. Copy summary, action items, and transcript
+4. Paste into `_templates/fathom-import.md`
+5. Save to `_inbox/meetings/`
+
+### Otter
+1. Open your transcript in Otter
+2. Click Share → Export → TXT (or Copy)
+3. Paste into `_templates/otter-import.md`
+4. Save to `_inbox/meetings/`
+
+### Quick Notes
+If you just have raw notes or a transcript from any source:
+1. Create new file in `_inbox/meetings/`
+2. Add minimal frontmatter: `date:` and `status: pending_enrichment`
+3. Paste content below
+4. Run `/ingest-meetings`
+
+The AI will figure out the rest!
