@@ -113,7 +113,7 @@ ollama pull llama3.2
 claude
 ```
 
-### First Run
+### First Run (5 minutes)
 
 ```bash
 # 1. Configure paths (finds Meetily database automatically)
@@ -122,11 +122,26 @@ claude
 # 2. Create your first project
 /add-project
 
-# 3. Record a meeting in Meetily, then:
+# 3. (Optional) Set up Google APIs for calendar/email
+python scripts/setup_google.py
+
+# 4. Test your configuration
+/test-integrations
+
+# 5. Record a meeting in Meetily, then:
 /run-pipeline
 ```
 
 That's it. Your meeting is now transcribed, summarized, wiki-linked, routed to the correct project, and optionally synced to Notion/Calendar/Email.
+
+### Setup Comparison
+
+| Old Setup | New Setup |
+|-----------|-----------|
+| 45+ minutes | **5 minutes** |
+| 15+ manual steps | **2-3 commands** |
+| Multiple config files | **Single config location** |
+| Cryptic error messages | **Guided diagnostics** |
 
 ## Command Reference
 
@@ -137,6 +152,8 @@ That's it. Your meeting is now transcribed, summarized, wiki-linked, routed to t
 | `/run-pipeline` | **The big one** — runs the complete workflow end-to-end |
 | `/setup` | Configure Meetily database and vault paths |
 | `/add-project` | Interactive wizard to create a new project |
+| `/test-integrations` | Verify all integrations are working |
+| `/setup-google` | Guided setup for Gmail and Calendar APIs |
 
 ### Pipeline Stages
 
@@ -170,14 +187,23 @@ That's it. Your meeting is now transcribed, summarized, wiki-linked, routed to t
 
 ```
 hyperflow/
+├── .hyperflow/
+│   ├── config.yaml        # Unified configuration file
+│   └── config.example.yaml
+├── .hyperflow.env         # Simple env-style config (alternative)
 ├── .claude/
-│   └── commands/          # Claude Code slash commands
-│       ├── run-pipeline.md
-│       ├── sync-meetily.md
-│       ├── ingest-meetings.md
-│       └── ...
+│   ├── commands/          # Claude Code slash commands
+│   │   ├── run-pipeline.md
+│   │   ├── sync-meetily.md
+│   │   ├── ingest-meetings.md
+│   │   ├── test-integrations.md
+│   │   ├── setup-google.md
+│   │   └── ...
+│   └── skills/            # Auto-invoked context for Claude Code
 ├── scripts/
-│   └── sync_meetily.py    # Python script for database export
+│   ├── sync_meetily.py    # Python script for database export
+│   ├── integrations.py    # Unified API client (Notion, Gmail, Calendar)
+│   └── setup_google.py    # Google OAuth setup wizard
 ├── _inbox/
 │   └── meetings/          # Raw meetings land here for processing
 ├── _drafts/
@@ -240,9 +266,37 @@ Meeting transcript
     └──► Email drafts (if requested)
 ```
 
-## MCP Integrations
+## External Integrations
 
-Hyperflow leverages Claude Code's [Model Context Protocol](https://modelcontextprotocol.io/) for external service connections:
+Hyperflow supports two integration methods:
+
+### Direct API (Recommended)
+
+Uses `scripts/integrations.py` — a unified Python client that connects directly to external APIs without MCP dependencies.
+
+**Advantages:**
+- Works in any environment (not Claude-specific)
+- Easier debugging and testing
+- Consistent authentication flow
+- No MCP server configuration needed
+
+**Setup:**
+```bash
+# Install dependencies
+pip install google-auth google-auth-oauthlib google-api-python-client pyyaml
+
+# Run setup wizard for Google APIs
+python scripts/setup_google.py
+
+# Test connections
+python scripts/integrations.py --test
+```
+
+### MCP Integration (Alternative)
+
+If you have Claude Code MCP servers configured, Hyperflow can use them instead.
+
+**To configure MCP servers**: See [Claude Code MCP documentation](https://docs.anthropic.com/claude-code/mcp)
 
 ### Notion
 
@@ -254,15 +308,29 @@ notion_workspace: "My Workspace"
 notion_tasks_database: "abc123-def456"
 ```
 
+Get your Notion token:
+1. Go to [Notion Integrations](https://www.notion.so/my-integrations)
+2. Create new integration
+3. Share your database with the integration
+4. Add token to config: `NOTION_TOKEN="ntn_xxxxx"`
+
 ### Google Calendar
 
 Automatically attach meeting notes to calendar events.
+
+```bash
+# Setup (one time)
+python scripts/setup_google.py
+```
 
 ### Gmail
 
 Send follow-up emails with personalized task lists.
 
-**To configure MCP servers**: See [Claude Code MCP documentation](https://docs.anthropic.com/claude-code/mcp)
+```bash
+# Setup (same as Calendar — uses shared credentials)
+python scripts/setup_google.py
+```
 
 ## Example Session
 
@@ -320,19 +388,66 @@ Created:
 
 ## Configuration
 
+### Configuration Files (Priority Order)
+
+1. **Environment variables** (highest priority)
+2. **`.hyperflow/config.yaml`** (unified config file)
+3. **`.hyperflow.env`** (simple key-value pairs)
+4. **Auto-detection** (Meetily database, vault path)
+
+### Quick Setup
+
+```bash
+# Option A: Use setup command (recommended)
+/setup
+
+# Option B: Manual .hyperflow.env
+cat > .hyperflow.env << EOF
+MEETILY_DB_PATH="~/Library/Application Support/com.meetily.ai/meeting_minutes.sqlite"
+HYPERFLOW_VAULT="$(pwd)"
+NOTION_TOKEN="ntn_your_token_here"
+EOF
+
+# Option C: Full config file
+cp .hyperflow/config.example.yaml .hyperflow/config.yaml
+# Edit the file with your values
+```
+
+### Unified Configuration File
+
+For full control, use `.hyperflow/config.yaml`:
+
+```yaml
+# Notion Integration
+notion:
+  token: "ntn_xxxxxxxxxxxx"
+  default_workspace: "My Workspace"
+
+# Google APIs (Gmail & Calendar)
+google:
+  credentials_file: "~/.hyperflow/google-oauth.json"
+  token_file: "~/.hyperflow/google_token.pickle"
+
+# Database and vault paths
+meetily_db_path: "~/Library/Application Support/com.meetily.ai/meeting_minutes.sqlite"
+vault_path: "~/Documents/hyperflow"
+
+# Project-specific overrides
+projects:
+  opencivics:
+    notion_database: "abc123-def456"
+    team_emails:
+      - "team@opencivics.co"
+```
+
 ### Environment Variables
 
 ```bash
 # In ~/.zshrc or ~/.bashrc:
 export MEETILY_DB_PATH="~/Library/Application Support/com.meetily.ai/meeting_minutes.sqlite"
 export HYPERFLOW_VAULT="~/Documents/hyperflow"
-```
-
-Or create `.hyperflow.env` in your vault root:
-
-```bash
-MEETILY_DB_PATH="/path/to/meeting_minutes.sqlite"
-HYPERFLOW_VAULT="/path/to/vault"
+export NOTION_TOKEN="ntn_your_token_here"
+export GOOGLE_CREDENTIALS_FILE="~/.hyperflow/google-oauth.json"
 ```
 
 ### Project Configuration
@@ -379,6 +494,43 @@ notion_tasks_database: "abc123-def456"
 | **Open source** | ✅ | ❌ | ❌ | ❌ |
 | **Notion sync** | ✅ | Limited | Limited | Limited |
 | **Email follow-ups** | ✅ | ❌ | ✅ | ❌ |
+
+## Troubleshooting
+
+Run `/test-integrations` for comprehensive diagnostics. Common issues:
+
+### Meetily Database Not Found
+
+```bash
+# Check if Meetily is installed
+ls ~/Library/Application\ Support/com.meetily.ai/
+
+# Manually specify path
+echo 'MEETILY_DB_PATH="$HOME/Library/Application Support/com.meetily.ai/meeting_minutes.sqlite"' >> .hyperflow.env
+```
+
+### Google OAuth Errors
+
+```bash
+# Re-run setup
+python scripts/setup_google.py
+
+# Delete cached tokens and retry
+rm ~/.hyperflow/gmail_token.pickle ~/.hyperflow/calendar_token.pickle
+python scripts/setup_google.py
+```
+
+### Notion "Unauthorized" Error
+
+1. Verify token: `echo $NOTION_TOKEN`
+2. Check database is shared with your integration
+3. Refresh token from [Notion Integrations](https://www.notion.so/my-integrations)
+
+### "No module named..." Errors
+
+```bash
+pip install google-auth google-auth-oauthlib google-api-python-client pyyaml
+```
 
 ## Roadmap
 

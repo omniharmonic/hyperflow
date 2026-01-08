@@ -1,0 +1,64 @@
+# Hyperflow Configuration
+# ======================
+# Copy this file to config.yaml and fill in your values.
+# All paths can be absolute or relative to the vault root.
+#
+# This is the single source of truth for Hyperflow configuration.
+# Environment variables will override values in this file.
+
+# Notion Integration
+# ------------------
+# Create an integration at: https://www.notion.so/my-integrations
+# Share your databases with the integration for access.
+notion:
+  token: ""  # e.g., "ntn_xxxxxxxxxxxx" or use env: NOTION_TOKEN
+  default_workspace: ""  # e.g., "Your Workspace Name"
+
+# Google APIs (Gmail & Calendar)
+# ------------------------------
+# Setup:
+#   1. Go to https://console.cloud.google.com
+#   2. Create a project (or use existing)
+#   3. Enable Gmail API and Calendar API
+#   4. Create OAuth 2.0 credentials (Desktop app type)
+#   5. Download JSON and place in ~/.hyperflow/
+google:
+  # Path to your OAuth credentials JSON from Google Cloud Console
+  credentials_file: "~/.hyperflow/google-oauth.json"
+  
+  # Where to store the authenticated token (auto-generated after first login)
+  token_file: "~/.hyperflow/google_token.pickle"
+  
+  # Required scopes (don't change unless you know what you're doing)
+  scopes:
+    - "https://www.googleapis.com/auth/gmail.send"
+    - "https://www.googleapis.com/auth/gmail.compose"
+    - "https://www.googleapis.com/auth/calendar"
+    - "https://www.googleapis.com/auth/calendar.events"
+
+# Meetily Integration
+# -------------------
+# Hyperflow syncs meeting recordings from Meetily's local SQLite database.
+meetily_db_path: ""  # Auto-detected if empty. Override: ~/Library/Application Support/com.meetily.ai/meeting_minutes.sqlite
+
+# Obsidian Vault
+# --------------
+vault_path: ""  # The root of your Obsidian vault. Auto-detected if running within vault.
+
+# Project Configurations
+# ----------------------
+# Define project-specific settings for Notion integration.
+# These supplement the PROJECT.md files in projects/{project}/
+projects:
+  # Example project configuration:
+  # example-project:
+  #   notion_database: "29b06d25-70f2-808d-a75a-d7c7e63960ba"  # Tasks database ID
+  #   team_emails:
+  #     - "alice@example.com"
+  #     - "bob@example.com"
+  
+  # opencivics:
+  #   notion_database: "your-database-id-here"
+  #   team_emails:
+  #     - "team@opencivics.co"
+

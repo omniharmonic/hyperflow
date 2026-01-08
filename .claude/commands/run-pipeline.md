@@ -1,6 +1,6 @@
 ---
 description: Run the complete Hyperflow pipeline - sync, ingest, tasks, calendar, and followups
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, mcp__google-calendar__list-calendars, mcp__google-calendar__list-events, mcp__google-calendar__update-event, mcp__google-calendar__create-event, mcp__gmail__send-email, mcp__gmail__create-draft
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, mcp__google-calendar__list-calendars, mcp__google-calendar__list-events, mcp__google-calendar__update-event, mcp__google-calendar__create-event, mcp__gmail__send-email, mcp__gmail__create-draft, mcp__notion__query-database, mcp__notion__create-page
 argument-hint: [--all | --since DATE | --skip-calendar | --skip-email | --draft-only]
 ---
 
@@ -418,6 +418,24 @@ Choice:
    
 Continuing to Stage 5...
 ```
+
+### Using Direct API Integration (Alternative to MCP)
+
+If MCP tools are not available, the pipeline can use `scripts/integrations.py` for direct API access:
+
+```bash
+# Test integrations
+python scripts/integrations.py --test
+
+# Setup Google APIs (Gmail + Calendar)
+python scripts/setup_google.py
+```
+
+The direct API approach provides:
+- Consistent authentication flow
+- Better error messages
+- Works outside Claude Code
+- No MCP configuration needed
 
 ---
 
