@@ -1,330 +1,414 @@
 # Hyperflow
 
-Intelligent Meeting Knowledge System - A local-first, privacy-preserving pipeline that captures meeting audio, transcribes it locally, generates AI summaries, and intelligently organizes outputs into an Obsidian knowledge base.
+**Turn every meeting into actionable knowledge — automatically.**
 
-## What's Included
+Hyperflow is an open-source, AI-powered meeting intelligence system that transforms raw meeting recordings into an interconnected knowledge base. Built on [Meetily](https://github.com/Zackriya-Solutions/meeting-minutes) (local transcription) and [Claude Code](https://claude.ai/claude-code) (AI orchestration), it delivers the power of enterprise meeting tools while keeping your data completely private.
+
+> **Zero cloud dependencies. Fully local transcription. Your meetings stay yours.**
+
+## Why Hyperflow?
+
+| Traditional Workflow | With Hyperflow |
+|----------------------|----------------|
+| Record meeting | Record meeting |
+| Manually take notes | *Automatic* |
+| Transcribe (pay per minute) | *Free, local via Ollama* |
+| Write summary | *AI-generated* |
+| Extract action items | *Extracted & assigned* |
+| Create tasks in project tool | *Synced to Notion automatically* |
+| Email participants their tasks | *One command* |
+| Link to calendar event | *Automatic* |
+| Organize in knowledge base | *Routed to project folder* |
+| Remember who said what | *Wiki-linked people profiles* |
+
+**One command: `/run-pipeline`** — does all of the above.
+
+## The Stack
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         YOUR MEETING                             │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  MEETILY (Local Transcription)                                   │
+│  ├─ Records system audio + microphone                           │
+│  ├─ Runs Whisper/Ollama locally — no API costs                  │
+│  └─ Stores transcripts in SQLite                                │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  HYPERFLOW + CLAUDE CODE (AI Orchestration)                      │
+│  ├─ /sync-meetily     → Exports from Meetily DB                 │
+│  ├─ /ingest-meetings  → Extracts entities, creates wiki-links   │
+│  ├─ /sync-tasks       → Pushes tasks to person profiles         │
+│  ├─ /sync-notion      → Creates tasks in Notion                 │
+│  ├─ /link-calendar    → Attaches notes to Google Calendar       │
+│  └─ /send-followups   → Emails participants their action items  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  OBSIDIAN (Knowledge Base)                                       │
+│  ├─ projects/*/meetings/  → Project-specific meeting notes      │
+│  ├─ people/               → Auto-generated person profiles      │
+│  ├─ concepts/             → Wiki-linkable knowledge graph       │
+│  └─ Full-text search, backlinks, graph view                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Features
+
+### Intelligent Meeting Processing
+
+- **Entity Extraction**: Automatically identifies people, organizations, concepts, and creates wiki-linked files
+- **Project Routing**: Scores meetings against your project context and routes to the right folder
+- **Summary Generation**: Creates structured summaries with key insights, decisions, and action items
+- **Wiki-Linking**: First occurrence of each entity becomes a clickable link in your knowledge graph
+
+### Task Management
+
+- **Action Item Extraction**: Parses tasks from transcripts with assignees and due dates
+- **Person Profiles**: Each person gets a file tracking their tasks, meeting history, and context
+- **Notion Integration**: Push tasks directly to project-specific Notion databases
+- **Email Follow-ups**: Generate personalized emails with each participant's action items
+
+### Calendar Integration
+
+- **Event Matching**: Finds the calendar event that corresponds to your meeting
+- **Note Attachment**: Adds meeting summary and action items to calendar event description
+- **Bidirectional Linking**: Meeting notes link to calendar; calendar links to notes
+
+### Privacy-First Design
+
+- **Local Transcription**: Meetily uses Whisper/Ollama — audio never leaves your machine
+- **No Cloud Lock-in**: Your data lives in SQLite + Markdown files you control
+- **Offline-Capable**: Core functionality works without internet
+- **Git-Friendly**: Version control your entire knowledge base
+
+## Quick Start
+
+### Prerequisites
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| [Meetily](https://github.com/Zackriya-Solutions/meeting-minutes/releases) | Local transcription | Download release |
+| [Ollama](https://ollama.ai) | Local LLM for transcription | `brew install ollama` |
+| [Claude Code](https://claude.ai/claude-code) | AI orchestration | `npm install -g @anthropic-ai/claude-code` |
+| Python 3 | Sync script | Usually pre-installed |
+
+### Installation
+
+```bash
+# Clone as your Obsidian vault
+git clone https://github.com/omniharmonic/hyperflow.git ~/Documents/hyperflow
+cd ~/Documents/hyperflow
+
+# Pull an Ollama model for Meetily
+ollama pull llama3.2
+
+# Open in Claude Code
+claude
+```
+
+### First Run
+
+```bash
+# 1. Configure paths (finds Meetily database automatically)
+/setup
+
+# 2. Create your first project
+/add-project
+
+# 3. Record a meeting in Meetily, then:
+/run-pipeline
+```
+
+That's it. Your meeting is now transcribed, summarized, wiki-linked, routed to the correct project, and optionally synced to Notion/Calendar/Email.
+
+## Command Reference
+
+### Core Commands
+
+| Command | Description |
+|---------|-------------|
+| `/run-pipeline` | **The big one** — runs the complete workflow end-to-end |
+| `/setup` | Configure Meetily database and vault paths |
+| `/add-project` | Interactive wizard to create a new project |
+
+### Pipeline Stages
+
+| Command | Stage | Description |
+|---------|-------|-------------|
+| `/sync-meetily` | 1 | Export new meetings from Meetily's SQLite database |
+| `/ingest-meetings` | 2 | Extract entities, add wiki-links, route to projects |
+| `/sync-tasks` | 3a | Push action items to person profile files |
+| `/sync-notion` | 3b | Create tasks in project Notion databases |
+| `/link-calendar` | 4 | Attach notes to Google Calendar events |
+| `/send-followups` | 5 | Email participants their action items |
+
+### Command Options
+
+```bash
+# Sync
+/sync-meetily --all        # Re-export all meetings
+/sync-meetily --list       # Show meetings in database
+
+# Pipeline
+/run-pipeline --skip-email    # Skip follow-up emails
+/run-pipeline --draft-only    # Save emails as drafts
+/run-pipeline --since 2024-01-01  # Only recent meetings
+
+# Batch processing
+/sync-notion --all            # Sync all meetings to Notion
+/link-calendar --batch        # Link all unlinked meetings
+```
+
+## Directory Structure
 
 ```
 hyperflow/
-├── CLAUDE.md                    # Vault context for Claude Code
 ├── .claude/
-│   ├── commands/
-│   │   ├── sync-meetily.md      # /sync-meetily command
-│   │   ├── ingest-meetings.md   # /ingest-meetings command  
-│   │   ├── extract-actions.md   # /extract-actions command
-│   │   └── send-followups.md    # /send-followups command
-│   └── skills/
-│       └── meeting-processor/   # Auto-invoked processing rules
+│   └── commands/          # Claude Code slash commands
+│       ├── run-pipeline.md
+│       ├── sync-meetily.md
+│       ├── ingest-meetings.md
+│       └── ...
 ├── scripts/
-│   └── sync_meetily.py          # Syncs from Meetily database
-├── _templates/                  # Note templates
-├── _inbox/meetings/             # Raw meetings land here
-├── _drafts/followups/           # Generated email drafts
-├── projects/_example-project/   # Example project structure
-├── people/                      # Person notes
-├── meetings/                    # General/unmatched meetings
-└── concepts/                    # Wiki-linkable concepts
+│   └── sync_meetily.py    # Python script for database export
+├── _inbox/
+│   └── meetings/          # Raw meetings land here for processing
+├── _drafts/
+│   └── followups/         # Generated email drafts
+├── projects/
+│   └── [project-name]/
+│       ├── PROJECT.md     # Project context (team, keywords, Notion config)
+│       ├── index.md       # Project overview
+│       └── meetings/      # Processed meeting notes
+├── people/                # Auto-generated person profiles
+├── concepts/              # Wiki-linkable concept definitions
+├── organizations/         # Company/institution profiles
+└── meetings/              # General meetings (no project match)
 ```
-
----
-
-## Installation
-
-### Option A: Fresh Vault
-
-### Option A: Clone as Your Vault
-
-Clone this repository to use as your Obsidian vault:
-```bash
-git clone https://github.com/omniharmonic/hyperflow.git ~/Documents/my-vault
-cd ~/Documents/my-vault
-```
-
-### Option B: Add to Existing Vault
-
-Copy the pieces you need:
-```bash
-# Required
-cp -r hyperflow/.claude ~/my-vault/
-cp -r hyperflow/scripts ~/my-vault/
-cp hyperflow/CLAUDE.md ~/my-vault/
-
-# Recommended
-cp -r hyperflow/_templates ~/my-vault/
-cp -r hyperflow/_inbox ~/my-vault/
-cp -r hyperflow/projects ~/my-vault/
-mkdir -p ~/my-vault/{people,meetings,concepts,_drafts/followups}
-```
-
----
-
-## Setup Checklist
-
-### 1. Install Prerequisites
-
-- [ ] **Meetily**: Download from [GitHub Releases](https://github.com/Zackriya-Solutions/meeting-minutes/releases)
-- [ ] **Ollama**: Install from [ollama.ai](https://ollama.ai)
-  ```bash
-  ollama pull llama3.2
-  ```
-- [ ] **Python 3**: Usually pre-installed on macOS/Linux
-
-### 2. Configure Vault
-
-- [ ] Open vault in Obsidian
-- [ ] Install recommended plugins:
-  - Dataview (for meeting lists)
-  - Templater (optional, for templates)
-
-### 3. Create Your First Project
-
-```bash
-cd ~/my-vault/projects
-cp -r _example-project my-project
-```
-
-Edit `my-project/PROJECT.md`:
-- Add your team members
-- Add keywords that identify this project
-- Update aliases
-
-### 4. Record a Test Meeting
-
-1. Open Meetily
-2. Start recording
-3. Talk for 30 seconds
-4. Stop and let it generate a summary
-
----
-
-## Usage
-
-### First Time Setup
-
-```
-1. Open vault in Claude Code
-2. /setup              ← Finds Meetily DB, configures paths
-3. /add-project        ← Create your first project
-```
-
-### Daily Workflow
-
-**One Command (Recommended):**
-```
-/run-pipeline          ← Runs the entire workflow automatically
-```
-
-**Or Step-by-Step:**
-```
-1. Record meetings in Meetily (normal usage)
-2. /sync-meetily       ← Pull new meetings into vault
-3. /ingest-meetings    ← Process and route to projects
-4. /sync-tasks         ← Push action items to person profiles
-5. /link-calendar      ← Attach to Google Calendar (optional)
-6. /send-followups     ← Email participants (optional)
-```
-
-### Command Reference
-
-| Command | What It Does |
-|---------|--------------|
-| `/run-pipeline` | **Master orchestrator** - runs the complete workflow automatically |
-| `/setup` | **Run first!** Finds Meetily DB, configures vault path |
-| `/sync-meetily` | Exports new meetings from Meetily's database to `_inbox/meetings/` |
-| `/sync-meetily --all` | Re-exports all meetings (fresh start) |
-| `/sync-meetily --list` | Shows meetings in Meetily database |
-| `/sync-meetily --db /path/to/db` | Use custom database path |
-| `/ingest-meetings` | Processes inbox, matches to projects, adds links |
-| `/ingest-meetings path/to/file.md` | Process a specific file |
-| `/add-project` | Interactive wizard to create a new project |
-| `/sync-tasks` | Push action items from meetings to person profiles |
-| `/sync-notion` | Push tasks to Notion databases (requires Notion MCP + project config) |
-| `/link-calendar path/to/meeting.md` | Attach meeting notes to Google Calendar event (requires Calendar MCP) |
-| `/send-followups path/to/meeting.md` | Send follow-up emails with task reminders (requires Gmail MCP) |
-| `/send-followups --draft` | Create email drafts without sending |
-
----
-
-## Configuration
-
-### Environment Variables (Optional)
-
-Set these to override auto-detection:
-
-```bash
-# In ~/.zshrc or ~/.bashrc:
-export MEETILY_DB_PATH="~/Library/Application Support/ai.meetily.app/meeting_minutes.sqlite"
-export HYPERFLOW_VAULT="~/Documents/my-vault"
-```
-
-### Command-Line Overrides
-
-```bash
-# Specify database path directly
-python3 scripts/sync_meetily.py --db /path/to/database.sqlite
-
-# Specify vault path directly  
-python3 scripts/sync_meetily.py --vault /path/to/vault
-```
-
-### Default Locations
-
-| Setting | macOS | Windows | Linux |
-|---------|-------|---------|-------|
-| Meetily DB | `~/Library/Application Support/ai.meetily.app/` | `%APPDATA%/ai.meetily.app/` | `~/.local/share/ai.meetily.app/` |
-| Vault | Script's parent directory | Script's parent directory | Script's parent directory |
-
----
 
 ## How It Works
 
-### Data Flow
-
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Meetily   │ ──► │  SQLite DB  │ ──► │ /sync-      │ ──► │ _inbox/     │
-│  (vanilla)  │     │  (native)   │     │  meetily    │     │  meetings/  │
-└─────────────┘     └─────────────┘     └─────────────┘     └──────┬──────┘
-                                                                   │
-                    ┌─────────────┐     ┌─────────────┐            │
-                    │ projects/   │ ◄── │ /ingest-    │ ◄──────────┘
-                    │ */meetings/ │     │  meetings   │
-                    └─────────────┘     └─────────────┘
-```
-
 ### Project Matching
 
-When you run `/ingest-meetings`, Claude Code:
+When processing a meeting, Hyperflow scores it against each project:
 
-1. Reads each file in `_inbox/meetings/` with `status: pending_enrichment`
-2. Loads all `PROJECT.md` files to get team, keywords, aliases
-3. Scores each project based on content matches:
-   - Project name mentioned: +5 points
-   - Alias mentioned: +4 points
-   - Team member name: +3 points
-   - Keyword found: +2 points
-4. Routes to highest-scoring project (if ≥4 points) or `meetings/` folder
+| Signal | Points |
+|--------|--------|
+| Project name mentioned | +5 |
+| Project alias used | +4 |
+| Team member name | +3 |
+| Project keyword | +2 |
 
----
+- **≥8 points**: Strong match → routes to project folder
+- **4-7 points**: Moderate match → routes with confidence note
+- **<4 points**: No match → goes to general `meetings/` folder
 
-## Customization
+### Entity Extraction
 
-### Add a New Project
+From a transcript like:
+> "Sarah mentioned that we should talk to Marcus about the TrustGraph implementation..."
 
-**Option A: Interactive (Recommended)**
+Hyperflow creates:
+- `people/Sarah Chen.md` — with context from the meeting
+- `people/Marcus Johnson.md` — linked as mentioned
+- `concepts/TrustGraph.md` — linked technical concept
 
-Run `/add-project` in Claude Code. It will guide you through:
-- Project name and aliases
-- Team members and emails
-- Keywords for auto-matching
-- Related links
+And transforms the transcript to:
+> "[[people/Sarah Chen|Sarah]] mentioned that we should talk to [[people/Marcus Johnson|Marcus]] about the [[concepts/TrustGraph]] implementation..."
 
-**Option B: Manual**
+### Task Flow
 
-1. Create folder: `projects/my-project/`
-2. Create `PROJECT.md` with:
-   - Team members (name + email)
-   - Keywords unique to this project
-   - Aliases (short names people use)
-3. Create `index.md` for the project overview
-4. Create `meetings/` subfolder
+```
+Meeting transcript
+    │
+    ▼ (extract action items)
+┌─────────────────────────────────────┐
+│ - [ ] Complete onboarding - @Patricia│
+│ - [ ] Review timeline - @Spencer     │
+└─────────────────────────────────────┘
+    │
+    ├──► people/Patricia.md (Open Tasks section)
+    ├──► people/Spencer.md (Open Tasks section)
+    ├──► Notion database (if configured)
+    └──► Email drafts (if requested)
+```
 
-### Adjust Matching Sensitivity
+## MCP Integrations
 
-Edit `.claude/skills/meeting-processor/SKILL.md`:
-- Change signal weights
-- Adjust threshold values
-
----
-
-## Troubleshooting
-
-### "Meetily database not found"
-
-1. Open Meetily and record at least one meeting
-2. Check database exists:
-   ```bash
-   ls ~/Library/Application\ Support/ai.meetily.app/
-   ```
-
-### Meetings not matching to projects
-
-1. Check `PROJECT.md` has keywords that appear in transcripts
-2. Add team member names exactly as they appear in Meetily
-3. Run `/ingest-meetings` with a specific file to see debug output
-
-### Command not recognized
-
-1. Ensure `.claude/commands/` folder exists in vault root
-2. Check file has correct frontmatter with `---` delimiters
-3. Restart Claude Code session
-
----
-
-## MCP Integrations (Optional)
-
-Hyperflow can integrate with external services via Claude Code's Model Context Protocol (MCP):
+Hyperflow leverages Claude Code's [Model Context Protocol](https://modelcontextprotocol.io/) for external service connections:
 
 ### Notion
 
-Push action items to Notion task databases.
+Push tasks to project-specific databases.
 
-**Setup:**
-1. Install the Notion MCP server
-2. Configure OAuth credentials
-3. Add to each project's `PROJECT.md`:
-   ```yaml
-   notion_workspace: "Your Workspace"
-   notion_tasks_database: "database-id-from-url"
-   ```
-4. Use `/sync-notion` or let `/run-pipeline` handle it automatically
-
-**What it does:**
-- Creates tasks in project-specific Notion databases
-- Links back to source meeting
-- Includes assignee, due date, status
-- Avoids duplicates
+```yaml
+# In projects/my-project/PROJECT.md:
+notion_workspace: "My Workspace"
+notion_tasks_database: "abc123-def456"
+```
 
 ### Google Calendar
 
-Link meeting notes to calendar events automatically.
-
-**Setup:**
-1. Install the Google Calendar MCP server
-2. Configure OAuth credentials
-3. Use `/link-calendar` to attach notes to events
-
-**What it does:**
-- Finds calendar events matching meeting date/time
-- Adds meeting summary to event description
-- Links notes back to calendar
+Automatically attach meeting notes to calendar events.
 
 ### Gmail
 
-Send follow-up emails with action items to participants.
+Send follow-up emails with personalized task lists.
 
-**Setup:**
-1. Install the Gmail MCP server
-2. Configure OAuth credentials
-3. Use `/send-followups` to email participants
+**To configure MCP servers**: See [Claude Code MCP documentation](https://docs.anthropic.com/claude-code/mcp)
 
-**What it does:**
-- Generates personalized emails per participant
-- Includes their assigned action items
-- Can save as drafts or send directly
+## Example Session
+
+```
+$ claude
+claude> /run-pipeline
+
+🚀 HYPERFLOW PIPELINE
+═══════════════════════════════════════════════════
+
+📋 Stage 1/5: Sync Meetily Database
+────────────────────────────────────
+✅ Synced 2 new meetings:
+   • 2024-01-08T10-15_team-standup.md
+   • 2024-01-08T14-30_client-call.md
+
+📋 Stage 2/5: Ingest Meetings
+────────────────────────────────────
+📄 team-standup.md
+   ├─ Project: OpenCivics (score: 9, high confidence)
+   ├─ Entities: 3 people, 2 concepts
+   ├─ Action items: 3
+   └─ ✅ Moved to: projects/opencivics/meetings/
+
+📄 client-call.md
+   ├─ Project: Localism Fund (score: 6, medium confidence)
+   ├─ Entities: 1 person (new), 2 concepts
+   └─ ✅ Moved to: projects/localism-fund/meetings/
+
+Created:
+   • people/Jane Client.md (new)
+   • concepts/Impact Metrics.md (new)
+
+📋 Stage 3: Sync Tasks
+────────────────────────────────────
+✅ Updated 3 person profiles with 5 tasks
+✅ Created 3 tasks in Notion (OpenCivics)
+
+📋 Stage 4: Link Calendar
+────────────────────────────────────
+📅 Linked 2 meetings to calendar events
+
+📋 Stage 5: Follow-ups
+────────────────────────────────────
+📧 Created 3 email drafts in Gmail
+
+✨ PIPELINE COMPLETE
+═══════════════════════════════════════════════════
+   📥 Meetings synced: 2
+   👤 People created: 1
+   ✅ Tasks synced: 5
+   📅 Calendar linked: 2
+   📧 Drafts created: 3
+```
+
+## Configuration
+
+### Environment Variables
+
+```bash
+# In ~/.zshrc or ~/.bashrc:
+export MEETILY_DB_PATH="~/Library/Application Support/com.meetily.ai/meeting_minutes.sqlite"
+export HYPERFLOW_VAULT="~/Documents/hyperflow"
+```
+
+Or create `.hyperflow.env` in your vault root:
+
+```bash
+MEETILY_DB_PATH="/path/to/meeting_minutes.sqlite"
+HYPERFLOW_VAULT="/path/to/vault"
+```
+
+### Project Configuration
+
+Each project needs a `PROJECT.md` with:
+
+```yaml
+---
+name: "OpenCivics"
+aliases:
+  - "oc"
+  - "the civics project"
+status: active
+# Optional: Notion integration
+notion_workspace: "OpenCivics Workspace"
+notion_tasks_database: "abc123-def456"
+---
+
+## Team
+
+| Name | Email | Role |
+|------|-------|------|
+| Benjamin Life | ben@example.com | Lead |
+| Patricia Parkinson | patricia@example.com | Designer |
+
+## Keywords
+
+- governance
+- attestation
+- TrustGraph
+- civic technology
+```
+
+## Comparison
+
+| Feature | Hyperflow | Otter.ai | Fireflies | Grain |
+|---------|-----------|----------|-----------|-------|
+| **Local transcription** | ✅ | ❌ | ❌ | ❌ |
+| **Privacy** | Your machine | Cloud | Cloud | Cloud |
+| **Cost** | Free | $16/mo+ | $19/mo+ | $19/mo+ |
+| **Knowledge graph** | ✅ Obsidian | ❌ | ❌ | ❌ |
+| **Custom routing** | ✅ | ❌ | ❌ | ❌ |
+| **Wiki-linking** | ✅ | ❌ | ❌ | ❌ |
+| **Open source** | ✅ | ❌ | ❌ | ❌ |
+| **Notion sync** | ✅ | Limited | Limited | Limited |
+| **Email follow-ups** | ✅ | ❌ | ✅ | ❌ |
+
+## Roadmap
+
+- [ ] Real-time transcription mode
+- [ ] Meeting templates per project
+- [ ] Slack/Discord notifications
+- [ ] Linear/Jira task integration
+- [ ] Speaker diarization
+- [ ] Meeting analytics dashboard
+
+## Contributing
+
+Contributions welcome! This project is built with:
+
+- **Python** for Meetily database sync
+- **Markdown** for Claude Code commands and knowledge base
+- **Claude Code** as the AI orchestration layer
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## Acknowledgments
+
+- [Meetily](https://github.com/Zackriya-Solutions/meeting-minutes) — The excellent open-source meeting recorder this builds on
+- [Claude Code](https://claude.ai/claude-code) — The AI agent making intelligent processing possible
+- [Obsidian](https://obsidian.md) — The knowledge base that ties it all together
+
+## License
+
+MIT — See [LICENSE](LICENSE)
 
 ---
 
-## Files to Delete After Testing
-
-- `_inbox/meetings/_EXAMPLE_*.md` - Test meeting file
-- `projects/_example-project/` - Example project (after creating your own)
-
----
-
-## Support
-
-- [Meetily GitHub](https://github.com/Zackriya-Solutions/meeting-minutes)
-- [Claude Code Docs](https://docs.anthropic.com/claude-code)
-- [Obsidian Help](https://help.obsidian.md)
-
+**Built by [omniharmonic](https://github.com/omniharmonic)** | [Report Issues](https://github.com/omniharmonic/hyperflow/issues)
