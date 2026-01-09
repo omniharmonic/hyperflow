@@ -91,6 +91,9 @@ Meetily → sync_meetily.py → _inbox/meetings/ → Claude Code Skills → Obsi
 | **[spaCy](https://spacy.io/)** | Fast offline NER | Preprocessing layer; no API calls; multiple model sizes |
 | **[Quartz](https://github.com/jackyzha0/quartz)** | Static site generator | Built for Obsidian vaults; graph view; full-text search |
 | **[Foam](https://foambubble.github.io/foam/)** | VS Code wiki (optional) | Native VS Code experience; Git-based; open source |
+| **[Jekyll Garden](https://github.com/maximevaillancourt/digital-garden-jekyll-template)** | Jekyll publishing | Wikilinks, backlinks, graph; Netlify-friendly |
+| **[Eleventy](https://github.com/juanfrank77/foam-eleventy-template)** | Fast SSG | Zero-config, flexible, Foam-native template |
+| **[Gatsby KB](https://github.com/hikerpig/foam-template-gatsby-kb)** | React-based SSG | Rich interactivity, GitHub Actions ready |
 
 ### Revised Architecture
 
@@ -543,51 +546,85 @@ python scripts/ingest_paper.py s2:12345678
 
 ---
 
-### 5. `scripts/publish_quartz.py` — Static Site Publishing
+### 5. `scripts/publish_site.py` — Multi-Platform Static Site Publishing
 
-**Purpose:** Build and deploy knowledge base as Quartz static site
+**Purpose:** Build and deploy knowledge base using Quartz, Jekyll, Eleventy, or Gatsby
+
+#### Supported Publishing Frameworks
+
+| Framework | Best For | Graph View | Wikilinks | Deploy Target |
+|-----------|----------|------------|-----------|---------------|
+| **Quartz** | Obsidian users | ✅ Built-in | ✅ Native | GitHub Pages |
+| **Jekyll Garden** | Simplicity | ✅ D3.js | ✅ Plugin | Netlify, GitHub Pages* |
+| **Eleventy** | Speed, flexibility | ❌ Add-on | ✅ Plugin | Netlify, Vercel |
+| **Gatsby KB** | Rich interactivity | ✅ Built-in | ✅ Native | GitHub Pages, Vercel |
+
+*Note: Jekyll Garden's graph requires custom plugin; use Netlify for full features or build locally for GitHub Pages.
 
 ```python
 """
-Publish Obsidian/Foam vault to GitHub Pages via Quartz.
-Handles selective export, privacy filtering, and deployment.
+Multi-platform static site publishing for Hyperflow.
+Supports Quartz, Jekyll Garden, Eleventy, and Gatsby KB.
 """
 
 import subprocess
 import shutil
 from pathlib import Path
+from abc import ABC, abstractmethod
 import yaml
+import re
 
-class QuartzPublisher:
-    def __init__(self, vault_path: Path, quartz_path: Path):
+class SitePublisher(ABC):
+    """Base class for all static site publishers."""
+
+    def __init__(self, vault_path: Path, site_path: Path):
         self.vault_path = vault_path
-        self.quartz_path = quartz_path
-        self.content_path = quartz_path / "content"
+        self.site_path = site_path
 
-    def publish(self,
-                include_patterns: list[str] = None,
+    @abstractmethod
+    def get_content_path(self) -> Path:
+        """Return the content directory for this framework."""
+        pass
+
+    @abstractmethod
+    def build(self) -> None:
+        """Build the static site."""
+        pass
+
+    @abstractmethod
+    def deploy(self, target: str) -> None:
+        """Deploy to hosting platform."""
+        pass
+
+    def publish(self, include_patterns: list[str] = None,
                 exclude_patterns: list[str] = None,
-                public_only: bool = True) -> None:
-        """Build and optionally deploy Quartz site."""
+                public_only: bool = True) -> int:
+        """Copy files and build site. Returns count of files copied."""
+        content_path = self.get_content_path()
 
-        # Step 1: Clear content directory
-        if self.content_path.exists():
-            shutil.rmtree(self.content_path)
-        self.content_path.mkdir(parents=True)
+        # Clear and recreate content directory
+        if content_path.exists():
+            shutil.rmtree(content_path)
+        content_path.mkdir(parents=True)
 
-        # Step 2: Copy eligible files
-        copied = self._copy_files(include_patterns, exclude_patterns, public_only)
-        print(f"Copied {len(copied)} files to Quartz content/")
+        # Copy eligible files
+        copied = self._copy_files(content_path, include_patterns,
+                                   exclude_patterns, public_only)
+        print(f"Copied {len(copied)} files to {content_path}")
 
-        # Step 3: Build site
-        self._build()
+        # Build
+        self.build()
+        return len(copied)
 
-    def _copy_files(self, include, exclude, public_only) -> list[Path]:
-        """Copy files that match criteria."""
+    def _copy_files(self, dest_root: Path, include: list,
+                    exclude: list, public_only: bool) -> list[Path]:
+        """Copy files matching criteria with privacy filtering."""
         copied = []
 
-        default_include = ["projects/**/*.md", "concepts/**/*.md", "people/**/*.md"]
-        default_exclude = ["_*/**", ".*/**", "**/PROJECT.md", "**/*private*"]
+        default_include = ["projects/**/*.md", "concepts/**/*.md",
+                          "people/**/*.md", "index.md"]
+        default_exclude = ["_*/**", ".*/**", "**/PROJECT.md",
+                          "**/*private*", "**/*personal*"]
 
         include = include or default_include
         exclude = exclude or default_exclude
@@ -599,12 +636,10 @@ class QuartzPublisher:
                 if public_only and not self._is_public(file):
                     continue
 
-                # Copy to quartz content
                 rel_path = file.relative_to(self.vault_path)
-                dest = self.content_path / rel_path
+                dest = dest_root / rel_path
                 dest.parent.mkdir(parents=True, exist_ok=True)
 
-                # Process file (strip private sections, etc.)
                 content = self._process_for_publish(file)
                 dest.write_text(content)
                 copied.append(dest)
@@ -612,60 +647,182 @@ class QuartzPublisher:
         return copied
 
     def _is_public(self, file: Path) -> bool:
-        """Check if file is marked public in frontmatter."""
-        content = file.read_text()
-        if not content.startswith("---"):
-            return False
-
+        """Check if file is marked public."""
         try:
+            content = file.read_text()
+            if not content.startswith("---"):
+                return False
             frontmatter = yaml.safe_load(content.split("---")[1])
-            return frontmatter.get("public", False) or "public" in frontmatter.get("tags", [])
+            return (frontmatter.get("public", False) or
+                    "public" in frontmatter.get("tags", []))
         except:
             return False
 
+    def _should_exclude(self, file: Path, patterns: list) -> bool:
+        """Check if file matches any exclude pattern."""
+        rel_path = str(file.relative_to(self.vault_path))
+        return any(file.match(p) for p in patterns)
+
     def _process_for_publish(self, file: Path) -> str:
-        """Strip private content, fix links for Quartz."""
+        """Process file for publishing: strip private, fix links."""
         content = file.read_text()
 
-        # Remove sections marked private
-        # (implementation: strip content between <!-- private --> markers)
-
-        # Convert Obsidian links to Quartz format if needed
-        # [[page]] → [page](page.md)
+        # Remove private sections (<!-- private --> ... <!-- /private -->)
+        content = re.sub(
+            r'<!--\s*private\s*-->.*?<!--\s*/private\s*-->',
+            '', content, flags=re.DOTALL
+        )
 
         return content
 
-    def _build(self) -> None:
-        """Run Quartz build."""
-        subprocess.run(
-            ["npx", "quartz", "build"],
-            cwd=self.quartz_path,
-            check=True
-        )
+
+class QuartzPublisher(SitePublisher):
+    """Quartz 4.x publisher - best for Obsidian-style vaults."""
+
+    def get_content_path(self) -> Path:
+        return self.site_path / "content"
+
+    def build(self) -> None:
+        subprocess.run(["npx", "quartz", "build"],
+                      cwd=self.site_path, check=True)
 
     def deploy(self, target: str = "github-pages") -> None:
-        """Deploy to hosting platform."""
+        subprocess.run(["npx", "quartz", "sync", "--no-pull"],
+                      cwd=self.site_path, check=True)
+
+
+class JekyllGardenPublisher(SitePublisher):
+    """Jekyll Digital Garden publisher - great with Netlify."""
+
+    def get_content_path(self) -> Path:
+        return self.site_path / "_notes"
+
+    def build(self) -> None:
+        subprocess.run(["bundle", "exec", "jekyll", "build"],
+                      cwd=self.site_path, check=True)
+
+    def deploy(self, target: str = "netlify") -> None:
+        if target == "netlify":
+            subprocess.run(["netlify", "deploy", "--prod"],
+                          cwd=self.site_path, check=True)
+        elif target == "github-pages":
+            # Jekyll builds to _site/, push that to gh-pages branch
+            subprocess.run(["ghp-import", "-n", "-p", "-f", "_site"],
+                          cwd=self.site_path, check=True)
+
+    def _process_for_publish(self, file: Path) -> str:
+        """Jekyll needs specific frontmatter format."""
+        content = super()._process_for_publish(file)
+
+        # Ensure Jekyll-compatible frontmatter
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            fm = yaml.safe_load(parts[1]) or {}
+            # Jekyll Garden expects 'title' in frontmatter
+            if 'title' not in fm:
+                fm['title'] = file.stem.replace('-', ' ').title()
+            parts[1] = yaml.dump(fm, default_flow_style=False)
+            content = "---".join(parts)
+
+        return content
+
+
+class EleventyPublisher(SitePublisher):
+    """Eleventy publisher - fast and flexible."""
+
+    def get_content_path(self) -> Path:
+        return self.site_path / "notes"  # Foam-eleventy convention
+
+    def build(self) -> None:
+        subprocess.run(["npx", "@11ty/eleventy"],
+                      cwd=self.site_path, check=True)
+
+    def deploy(self, target: str = "netlify") -> None:
+        if target == "netlify":
+            subprocess.run(["netlify", "deploy", "--prod", "--dir=_site"],
+                          cwd=self.site_path, check=True)
+        elif target == "vercel":
+            subprocess.run(["vercel", "--prod"],
+                          cwd=self.site_path, check=True)
+
+
+class GatsbyKBPublisher(SitePublisher):
+    """Gatsby Knowledge Base publisher - rich interactivity."""
+
+    def get_content_path(self) -> Path:
+        return self.site_path / "content"
+
+    def build(self) -> None:
+        subprocess.run(["npm", "run", "build"],
+                      cwd=self.site_path, check=True)
+
+    def deploy(self, target: str = "github-pages") -> None:
         if target == "github-pages":
-            subprocess.run(
-                ["npx", "quartz", "sync", "--no-pull"],
-                cwd=self.quartz_path,
-                check=True
-            )
+            subprocess.run(["npm", "run", "deploy"],
+                          cwd=self.site_path, check=True)
+        elif target == "vercel":
+            subprocess.run(["vercel", "--prod"],
+                          cwd=self.site_path, check=True)
+
+
+def get_publisher(framework: str, vault_path: Path, site_path: Path) -> SitePublisher:
+    """Factory function to get the right publisher."""
+    publishers = {
+        "quartz": QuartzPublisher,
+        "jekyll": JekyllGardenPublisher,
+        "eleventy": EleventyPublisher,
+        "gatsby": GatsbyKBPublisher,
+    }
+
+    if framework not in publishers:
+        raise ValueError(f"Unknown framework: {framework}. "
+                        f"Choose from: {list(publishers.keys())}")
+
+    return publishers[framework](vault_path, site_path)
 ```
 
 **CLI Usage:**
 ```bash
-# Build site with public content only
-python scripts/publish_quartz.py build --public-only
+# Build with Quartz (default)
+python scripts/publish_site.py build --framework quartz
 
-# Include specific folders
-python scripts/publish_quartz.py build --include "projects/opencivics/**" "concepts/**"
+# Build with Jekyll Garden for Netlify
+python scripts/publish_site.py build --framework jekyll --target netlify
 
-# Build and deploy to GitHub Pages
-python scripts/publish_quartz.py deploy --target github-pages
+# Build with Eleventy
+python scripts/publish_site.py build --framework eleventy
+
+# Build with Gatsby KB
+python scripts/publish_site.py build --framework gatsby
+
+# Deploy to GitHub Pages
+python scripts/publish_site.py deploy --framework quartz --target github-pages
+
+# Deploy to Netlify (best for Jekyll)
+python scripts/publish_site.py deploy --framework jekyll --target netlify
+
+# Include specific folders only
+python scripts/publish_site.py build --include "concepts/**" "projects/*/index.md"
 
 # Preview locally
-python scripts/publish_quartz.py preview --port 8080
+python scripts/publish_site.py preview --framework quartz --port 8080
+```
+
+#### Framework Selection Guide
+
+```
+Do you need rich graph visualization?
+├─ Yes → Do you prefer React-based sites?
+│        ├─ Yes → Gatsby KB
+│        └─ No → Quartz (recommended) or Jekyll Garden
+└─ No → Do you need maximum speed?
+         ├─ Yes → Eleventy
+         └─ No → Any framework works
+
+Deployment preference:
+├─ GitHub Pages (free) → Quartz or Gatsby
+├─ Netlify (free tier) → Jekyll or Eleventy
+└─ Vercel (free tier) → Eleventy or Gatsby
 ```
 
 ---

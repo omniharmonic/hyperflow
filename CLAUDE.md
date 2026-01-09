@@ -1,43 +1,166 @@
 # Hyperflow Knowledge Vault
 
-Automated meeting-to-knowledge pipeline using Meetily + Claude Code + Obsidian.
+AI-augmented knowledge management system with multi-source content ingestion, entity extraction, and static site publishing.
 
 ## Quick Start
 
+### For Meetings
 1. **Record a meeting** in [Meetily](https://github.com/Zackriya-Solutions/meeting-minutes)
 2. **Sync**: Run `/sync-meetily` to export from Meetily's database
 3. **Process**: Run `/ingest-meetings` to enrich and route to projects
 
+### For Other Content
+```bash
+# Ingest a PDF
+/ingest ~/Downloads/paper.pdf
+
+# Ingest a web article
+/ingest https://example.com/article
+
+# Ingest an arXiv paper
+/ingest arxiv:2301.00001
+
+# Quick capture
+/clip My quick note
+```
+
 ## Commands
+
+### Core Pipeline
 
 | Command | Description |
 |---------|-------------|
-| `/sync-meetily` | Export new meetings from Meetily's database to `_inbox/meetings/` |
-| `/ingest-meetings` | Process pending meetings, match to projects, add wiki-links |
+| `/run-pipeline` | Run complete pipeline (sync → ingest → tasks → calendar → followups) |
+| `/sync-meetily` | Export new meetings from Meetily's database |
+| `/ingest-meetings` | Process meetings, match to projects, add wiki-links |
+
+### Content Ingestion
+
+| Command | Description |
+|---------|-------------|
+| `/ingest [source]` | Universal ingestion - auto-detects PDFs, URLs, papers |
+| `/clip [title]` | Quick capture from conversation context |
+
+### Productivity
+
+| Command | Description |
+|---------|-------------|
 | `/extract-actions` | Extract action items from a meeting note |
-| `/send-followups` | Generate follow-up email drafts for participants |
+| `/sync-tasks` | Update person profiles with action items |
+| `/sync-notion` | Push tasks to Notion databases |
+| `/send-followups` | Generate follow-up emails for participants |
+| `/link-calendar` | Match meetings to Google Calendar events |
+
+### Publishing
+
+| Command | Description |
+|---------|-------------|
+| `/publish` | Build and deploy knowledge base as static site |
 
 ## Directory Structure
 
 ```
-├── _inbox/meetings/     # Raw Meetily exports land here
-├── _templates/          # Note templates
-├── _drafts/followups/   # Generated email drafts
-├── projects/            # Project folders
+├── _inbox/
+│   ├── meetings/     # Raw Meetily exports
+│   ├── papers/       # Ingested PDFs and research papers
+│   ├── articles/     # Ingested web articles
+│   └── clippings/    # Quick captures
+├── _templates/       # Note templates
+├── _drafts/          # Generated email drafts
+├── projects/         # Project folders
 │   └── [project-name]/
 │       ├── PROJECT.md   # Project context (team, keywords)
 │       ├── index.md     # Project overview
 │       └── meetings/    # Processed meeting notes
-├── people/              # Person notes
-├── meetings/            # General/unmatched meetings
-├── concepts/            # Wiki-linkable concepts
-└── scripts/             # Utility scripts (sync_meetily.py)
+├── people/           # Person notes
+├── organizations/    # Organization profiles
+├── meetings/         # General/unmatched meetings
+├── concepts/         # Wiki-linkable concepts
+├── scripts/          # Python utilities
+│   ├── sync_meetily.py      # Meetily database export
+│   ├── extract_entities.py  # Entity extraction (spaCy/LangExtract)
+│   ├── ingest_pdf.py        # PDF ingestion
+│   ├── ingest_web.py        # Web content ingestion
+│   ├── ingest_paper.py      # Academic paper ingestion
+│   ├── publish_site.py      # Static site publishing
+│   ├── integrations.py      # API integrations (Notion, Gmail, Calendar)
+│   └── setup_google.py      # Google OAuth setup
+├── .vscode/          # VS Code/Foam configuration
+├── .foam/            # Foam templates
+└── .hyperflow/       # Hyperflow configuration
 ```
 
-## Workflow
+## Content Ingestion
 
+### Supported Sources
+
+| Source | Script | Destination |
+|--------|--------|-------------|
+| Meetily meetings | `sync_meetily.py` | `_inbox/meetings/` |
+| PDF documents | `ingest_pdf.py` | `_inbox/papers/` |
+| Web articles | `ingest_web.py` | `_inbox/articles/` |
+| arXiv papers | `ingest_paper.py` | `_inbox/papers/` |
+| DOI references | `ingest_paper.py` | `_inbox/papers/` |
+| Semantic Scholar | `ingest_paper.py` | `_inbox/papers/` |
+
+### Script Usage
+
+```bash
+# PDFs
+python scripts/ingest_pdf.py document.pdf --auto-route
+
+# Web pages (uses Jina Reader)
+python scripts/ingest_web.py "https://example.com" --auto-route
+
+# Academic papers
+python scripts/ingest_paper.py arxiv:2301.00001 --download-pdf
+python scripts/ingest_paper.py doi:10.1234/example
+
+# Entity extraction
+python scripts/extract_entities.py file.md --format table
 ```
-Meetily → /sync-meetily → _inbox/meetings/ → /ingest-meetings → projects/*/meetings/
+
+## Entity Extraction
+
+Hyperflow uses a hybrid extraction approach:
+- **spaCy** for fast offline NER (people, organizations, dates)
+- **LangExtract** (optional) for deep structured extraction with Ollama
+
+```bash
+# Quick extraction
+python scripts/extract_entities.py meeting.md
+
+# With deep extraction (requires Ollama)
+python scripts/extract_entities.py meeting.md --deep --model llama3.2
+```
+
+## Publishing
+
+Publish your knowledge base as a static site using:
+- **Quartz** (recommended) - Best graph view, GitHub Pages
+- **Jekyll Garden** - Simple, Netlify-friendly
+- **Eleventy** - Fast, flexible
+- **Gatsby KB** - Rich interactivity
+
+```bash
+# Build with Quartz
+python scripts/publish_site.py build --framework quartz
+
+# Preview locally
+python scripts/publish_site.py preview --port 8080
+
+# Deploy to GitHub Pages
+python scripts/publish_site.py deploy --target github-pages
+```
+
+### Privacy Filtering
+
+Only files marked as public are published:
+```yaml
+---
+title: My Public Note
+public: true  # or add 'public' to tags
+---
 ```
 
 ## Project Matching
@@ -60,16 +183,75 @@ Meetings are matched to projects using signals from `PROJECT.md`:
 | People | `[[people/First Last]]` |
 | Projects | `[[projects/slug/index]]` |
 | Concepts | `[[concepts/Name]]` |
+| Organizations | `[[organizations/Name]]` |
 
 - Link first occurrence only
 - Max 10-15 links per document
-- Create person stubs if missing
+- Create stubs if missing
+
+## Editor Support
+
+### VS Code / Foam
+- Open this folder in VS Code
+- Install recommended extensions (see `.vscode/extensions.json`)
+- Use Foam for wiki-links, backlinks, and graph view
+- Run tasks via Command Palette (`Ctrl+Shift+P` → "Tasks: Run Task")
+
+### Obsidian
+- Open this folder as an Obsidian vault
+- Templates available in `_templates/`
+- Graph view and backlinks work out of the box
 
 ## Setup Checklist
 
+### Required
+- [ ] Install [Python 3.10+](https://python.org)
+- [ ] Install dependencies: `pip install -r requirements.txt`
+- [ ] Install spaCy model: `python -m spacy download en_core_web_md`
+
+### For Meetings
 - [ ] Install [Meetily](https://github.com/Zackriya-Solutions/meeting-minutes/releases)
 - [ ] Install [Ollama](https://ollama.ai) and pull a model (`ollama pull llama3.2`)
-- [ ] Create at least one project in `projects/` with a `PROJECT.md`
-- [ ] Record a test meeting
-- [ ] Run `/sync-meetily` then `/ingest-meetings`
 
+### For Publishing
+- [ ] Install Node.js 18+
+- [ ] Set up Quartz: `npx quartz create`
+
+### For Integrations
+- [ ] Set up Notion integration (add token to `.hyperflow/config.yaml`)
+- [ ] Set up Google OAuth: `python scripts/setup_google.py`
+
+## Configuration
+
+Create `.hyperflow/config.yaml`:
+
+```yaml
+# Meetily database path (auto-detected if not set)
+meetily_db_path: ~/Library/Application Support/com.meetily.ai/meeting_minutes.sqlite
+
+# Notion integration
+notion:
+  token: ntn_xxxxx
+  default_workspace: "My Workspace"
+
+# Publishing
+publishing:
+  framework: quartz
+  site_path: ~/projects/my-knowledge-site
+  deploy_target: github-pages
+```
+
+## Architecture
+
+```
+Content Sources              Processing                    Outputs
+───────────────             ──────────────                ─────────
+Meetily       ─┐            ┌────────────┐
+PDFs          ─┼─→ Ingest ─→│  spaCy /   │─→ Vault        ─→ Obsidian/Foam
+Web articles  ─┤   Scripts  │ LangExtract│   (Markdown)   ─→ Quartz Site
+arXiv papers  ─┤            └────────────┘                ─→ Notion Tasks
+Clipboard     ─┘                  │                       ─→ Gmail Drafts
+                                  ↓                       ─→ Calendar Links
+                           Claude Code
+                           (Orchestration)
+```
