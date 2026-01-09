@@ -121,6 +121,15 @@ class RegexExtractor:
         'meeting notes', 'discussion topics', 'agenda items', 'follow up',
         'action item', 'key point', 'next step', 'my thoughts', 'related notes',
         'google drive', 'google docs', 'google calendar', 'microsoft teams',
+        # Product/business terms
+        'corp product', 'launch planning', 'product launch', 'beta release',
+        'press release', 'pricing strategy', 'pricing model', 'marketing campaign',
+        'competitive analysis', 'board presentation', 'roadmap milestones',
+        # Technical terms
+        'create colab', 'colab notebook', 'demo notebook', 'github release',
+        'transformer library', 'attention mechanism', 'related work',
+        # Common verb phrases that look like names
+        'will do', 'and alex', 'and also', 'should also', 'can you',
     }
 
     # Patterns that look like names but aren't (common sentence starters)

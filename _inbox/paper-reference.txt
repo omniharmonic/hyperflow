@@ -1,0 +1,4 @@
+Paper to read for the attention mechanism research:
+arxiv:2301.00234
+
+This relates to our work on efficient transformers.
