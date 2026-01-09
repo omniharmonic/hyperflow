@@ -89,6 +89,116 @@ class ExtractionResult:
         return result
 
 
+class RegexExtractor:
+    """Fallback entity extraction using regex patterns when spaCy unavailable."""
+
+    # Speaker patterns from transcripts (most reliable)
+    # Matches **[Name]:** format (Meetily/Otter) - bold wraps [Name]:
+    SPEAKER_PATTERN_BRACKETS = re.compile(r'\*\*\[([^\]]+)\]:\*\*')
+    # Matches **Name**: format (Fathom) - bold wraps Name
+    SPEAKER_PATTERN_BOLD = re.compile(r'\*\*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\*\*\s*:')
+    # Matches **Name:** format (alternative Fathom) - bold wraps Name:
+    SPEAKER_PATTERN_BOLD_COLON = re.compile(r'\*\*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?):\*\*')
+    # Matches Name: at start of line
+    SPEAKER_PATTERN_PLAIN = re.compile(r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*:', re.MULTILINE)
+
+    # Common name patterns (two capitalized words on same line, no newlines)
+    NAME_PATTERN = re.compile(r'\b([A-Z][a-z]+[ \t]+[A-Z][a-z]+)\b')
+
+    # Date patterns
+    DATE_PATTERN = re.compile(
+        r'\b(\d{4}-\d{2}-\d{2}|'
+        r'\d{1,2}/\d{1,2}/\d{2,4}|'
+        r'(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s*\d{4}|'
+        r'(?:next|this)\s+(?:week|month|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)|'
+        r'(?:end of|by)\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Q[1-4]|the week|the month))\b',
+        re.IGNORECASE
+    )
+
+    # Common false positives to filter out
+    FALSE_POSITIVES = {
+        'action items', 'key points', 'next steps', 'summary', 'transcript',
+        'meeting notes', 'discussion topics', 'agenda items', 'follow up',
+        'action item', 'key point', 'next step', 'my thoughts', 'related notes',
+        'google drive', 'google docs', 'google calendar', 'microsoft teams',
+    }
+
+    # Patterns that look like names but aren't (common sentence starters)
+    FALSE_NAME_PATTERNS = re.compile(
+        r'^(Thanks?|Hello|Hi|Hey|Dear|Good|Great|Nice|Sure|Yes|No|Ok)\s+[A-Z]',
+        re.IGNORECASE
+    )
+
+    def extract(self, text: str) -> dict[str, list]:
+        """Extract entities using regex patterns."""
+        entities = {
+            'people': [],
+            'organizations': [],
+            'dates': [],
+            'locations': [],
+        }
+
+        # Extract speakers from transcript format (highest confidence)
+        speakers = set()
+        for pattern in [self.SPEAKER_PATTERN_BRACKETS, self.SPEAKER_PATTERN_BOLD,
+                        self.SPEAKER_PATTERN_BOLD_COLON, self.SPEAKER_PATTERN_PLAIN]:
+            for match in pattern.finditer(text):
+                name = match.group(1).strip()
+                if name and len(name) > 1:
+                    speakers.add(name)
+
+        for speaker in speakers:
+            entities['people'].append(Entity(
+                text=speaker,
+                label='SPEAKER',
+                start=0,
+                end=0,
+                confidence=0.95,
+            ))
+
+        # Extract names (filter out speakers to avoid duplicates)
+        seen_names = {s.lower() for s in speakers}
+        for match in self.NAME_PATTERN.finditer(text):
+            name = match.group(1).strip()
+            # Filter common false positives
+            if name.lower() in seen_names:
+                continue
+            if name.lower() in self.FALSE_POSITIVES:
+                continue
+            # Skip "Thanks Name", "Hello Name" etc.
+            if self.FALSE_NAME_PATTERNS.match(name):
+                continue
+            # Skip if it looks like a header (followed by newline or at section start)
+            context_start = max(0, match.start() - 5)
+            context_before = text[context_start:match.start()]
+            if '#' in context_before or context_before.strip().endswith('\n\n'):
+                continue
+            seen_names.add(name.lower())
+            entities['people'].append(Entity(
+                text=name,
+                label='PERSON',
+                start=match.start(),
+                end=match.end(),
+                confidence=0.7,
+            ))
+
+        # Extract dates
+        seen_dates = set()
+        for match in self.DATE_PATTERN.finditer(text):
+            date_text = match.group(1)
+            if date_text.lower() not in seen_dates:
+                seen_dates.add(date_text.lower())
+                entities['dates'].append(Entity(
+                    text=date_text,
+                    label='DATE',
+                    start=match.start(),
+                    end=match.end(),
+                    confidence=0.8,
+                ))
+
+        return entities
+
+
 class SpacyExtractor:
     """Fast entity extraction using spaCy."""
 
@@ -99,9 +209,8 @@ class SpacyExtractor:
         try:
             self.nlp = spacy.load(model)
         except OSError:
-            print(f"Model '{model}' not found. Downloading...")
-            spacy.cli.download(model)
-            self.nlp = spacy.load(model)
+            # Don't auto-download, raise informative error
+            raise RuntimeError(f"spaCy model '{model}' not found. Run: python -m spacy download {model}")
 
     def extract(self, text: str) -> dict[str, list[Entity]]:
         """Extract entities from text using spaCy NER."""
@@ -225,7 +334,20 @@ class HyperflowExtractor:
     """Main extractor combining spaCy and Ollama for hybrid extraction."""
 
     def __init__(self, model: str = "llama3.2", use_deep: bool = False):
-        self.spacy_extractor = SpacyExtractor() if SPACY_AVAILABLE else None
+        # Try spaCy first, fall back to regex if unavailable
+        self.spacy_extractor = None
+        self.regex_extractor = None
+
+        if SPACY_AVAILABLE:
+            try:
+                self.spacy_extractor = SpacyExtractor()
+            except RuntimeError as e:
+                print(f"Warning: spaCy model not available ({e}). Using regex fallback.")
+                self.regex_extractor = RegexExtractor()
+        else:
+            print("Warning: spaCy not installed. Using regex fallback.")
+            self.regex_extractor = RegexExtractor()
+
         self.ollama_extractor = OllamaExtractor(model) if (use_deep and OLLAMA_AVAILABLE) else None
         self.use_deep = use_deep
 
@@ -236,13 +358,18 @@ class HyperflowExtractor:
             extracted_at=datetime.now().isoformat(),
         )
 
-        # Fast extraction with spaCy
+        # Fast extraction with spaCy or regex fallback
         if self.spacy_extractor:
-            spacy_entities = self.spacy_extractor.extract(text)
-            result.people = spacy_entities['people']
-            result.organizations = spacy_entities['organizations']
-            result.dates = spacy_entities['dates']
-            result.locations = spacy_entities['locations']
+            entities = self.spacy_extractor.extract(text)
+        elif self.regex_extractor:
+            entities = self.regex_extractor.extract(text)
+        else:
+            entities = {'people': [], 'organizations': [], 'dates': [], 'locations': []}
+
+        result.people = entities['people']
+        result.organizations = entities['organizations']
+        result.dates = entities['dates']
+        result.locations = entities['locations']
 
         # Deep extraction with Ollama (if enabled)
         if self.ollama_extractor and self.use_deep:
@@ -319,27 +446,111 @@ class HyperflowExtractor:
 
 def extract_tasks_regex(text: str) -> list[dict]:
     """Fallback task extraction using regex patterns (no LLM required)."""
-    patterns = [
-        r'\[\s*\]\s*(?:\*\*)?(.+?)(?:\*\*)?(?:\s*\(due:?\s*([^)]+)\))?',  # - [ ] Task (due: date)
-        r'(?:TODO|Action|Task):\s*(.+)',  # TODO: task
-        r'(\w+)\s+(?:will|should|needs? to|must)\s+(.+?)(?:\.|$)',  # Name will do something
-        r'@(\w+)\s+(.+?)(?:\.|$)',  # @name task
-    ]
-
     tasks = []
-    for pattern in patterns:
-        for match in re.finditer(pattern, text, re.IGNORECASE | re.MULTILINE):
-            groups = match.groups()
-            if len(groups) >= 1:
-                task = {
-                    'task': groups[0].strip() if groups[0] else '',
-                    'assignee': groups[1].strip() if len(groups) > 1 and groups[1] else None,
-                    'deadline': None,
-                    'confidence': 'medium',
-                    'source_pattern': pattern[:30],
-                }
-                if task['task']:
-                    tasks.append(task)
+    seen_tasks = set()
+
+    # Pattern 1: Markdown checkboxes - [ ] Task (due: date)
+    checkbox_pattern = re.compile(
+        r'-\s*\[\s*\]\s*(.+?)(?:\s*\((?:due|by):?\s*([^)]+)\))?$',
+        re.MULTILINE
+    )
+    for match in checkbox_pattern.finditer(text):
+        task_text = match.group(1).strip().rstrip('.')
+        if task_text and task_text.lower() not in seen_tasks:
+            seen_tasks.add(task_text.lower())
+            tasks.append({
+                'task': task_text,
+                'assignee': None,
+                'deadline': match.group(2).strip() if match.group(2) else None,
+                'confidence': 'high',
+            })
+
+    # Pattern 2: "I'll/I will do X" - first person commitments
+    ill_pattern = re.compile(
+        r"I'?ll\s+(.+?)(?:\.|$)",
+        re.MULTILINE
+    )
+    for match in ill_pattern.finditer(text):
+        task_text = match.group(1).strip()
+        # Filter out short or generic phrases
+        if len(task_text) < 10:
+            continue
+        if task_text.lower() not in seen_tasks:
+            seen_tasks.add(task_text.lower())
+            tasks.append({
+                'task': task_text,
+                'assignee': None,  # Speaker context needed
+                'deadline': None,
+                'confidence': 'medium',
+            })
+
+    # Pattern 3: "Name will/should do X" (filter out pronouns)
+    will_pattern = re.compile(
+        r'\b([A-Z][a-z]+)\s+(?:will|should|needs? to|must)\s+(.+?)(?:\.|,|$)',
+        re.MULTILINE
+    )
+    skip_words = {'we', 'you', 'they', 'it', 'this', 'that', 'she', 'he', 'yes', 'no'}
+    for match in will_pattern.finditer(text):
+        name = match.group(1).strip()
+        if name.lower() in skip_words:
+            continue
+        task_text = match.group(2).strip()
+        # Filter out short or generic phrases
+        if len(task_text) < 10 or task_text.lower() in ('be great', 'be good', 'work'):
+            continue
+        if task_text.lower() not in seen_tasks:
+            seen_tasks.add(task_text.lower())
+            tasks.append({
+                'task': task_text,
+                'assignee': name,
+                'deadline': None,
+                'confidence': 'medium',
+            })
+
+    # Pattern 4: "can you/could you/would you" requests
+    request_pattern = re.compile(
+        r'(?:can you|could you|would you|please)\s+(.+?)(?:\?|$)',
+        re.MULTILINE | re.IGNORECASE
+    )
+    for match in request_pattern.finditer(text):
+        task_text = match.group(1).strip()
+        if len(task_text) >= 10 and task_text.lower() not in seen_tasks:
+            seen_tasks.add(task_text.lower())
+            tasks.append({
+                'task': task_text,
+                'assignee': None,
+                'deadline': None,
+                'confidence': 'medium',
+            })
+
+    # Pattern 5: TODO/Action/Task: labeled items
+    label_pattern = re.compile(
+        r'(?:TODO|Action(?:\s+Item)?|Task):\s*(.+?)$',
+        re.MULTILINE | re.IGNORECASE
+    )
+    for match in label_pattern.finditer(text):
+        task_text = match.group(1).strip().rstrip('.')
+        if task_text and task_text.lower() not in seen_tasks:
+            seen_tasks.add(task_text.lower())
+            tasks.append({
+                'task': task_text,
+                'assignee': None,
+                'deadline': None,
+                'confidence': 'high',
+            })
+
+    # Pattern 6: @mention tasks
+    mention_pattern = re.compile(r'@(\w+)\s+(.+?)(?:\.|$)', re.MULTILINE)
+    for match in mention_pattern.finditer(text):
+        task_text = match.group(2).strip()
+        if len(task_text) >= 5 and task_text.lower() not in seen_tasks:
+            seen_tasks.add(task_text.lower())
+            tasks.append({
+                'task': task_text,
+                'assignee': match.group(1),
+                'deadline': None,
+                'confidence': 'medium',
+            })
 
     return tasks
 

@@ -51,6 +51,12 @@ AI-augmented knowledge management system with multi-source content ingestion, en
 | `/send-followups` | Generate follow-up emails for participants |
 | `/link-calendar` | Match meetings to Google Calendar events |
 
+### Knowledge Management
+
+| Command | Description |
+|---------|-------------|
+| `/save [message]` | Create detailed Git commit of all vault changes |
+
 ### Publishing
 
 | Command | Description |
@@ -78,13 +84,18 @@ AI-augmented knowledge management system with multi-source content ingestion, en
 ├── concepts/         # Wiki-linkable concepts
 ├── scripts/          # Python utilities
 │   ├── sync_meetily.py      # Meetily database export
-│   ├── extract_entities.py  # Entity extraction (spaCy/LangExtract)
+│   ├── extract_entities.py  # Entity extraction (spaCy/regex fallback)
+│   ├── entities_to_kb.py    # Convert entities to KB markdown files
+│   ├── process_inbox.py     # Unified inbox processor (auto-detect file types)
+│   ├── sync_tasks.py        # Sync tasks to person profiles
+│   ├── diarize_audio.py     # Speaker diarization (pyannote + Whisper)
 │   ├── ingest_pdf.py        # PDF ingestion
 │   ├── ingest_web.py        # Web content ingestion
 │   ├── ingest_paper.py      # Academic paper ingestion
 │   ├── publish_site.py      # Static site publishing
 │   ├── integrations.py      # API integrations (Notion, Gmail, Calendar)
 │   └── setup_google.py      # Google OAuth setup
+├── tasks.md          # Central task dashboard with Dataview queries
 ├── .vscode/          # VS Code/Foam configuration
 ├── .foam/            # Foam templates
 └── .hyperflow/       # Hyperflow configuration
@@ -251,7 +262,100 @@ PDFs          ─┼─→ Ingest ─→│  spaCy /   │─→ Vault        �
 Web articles  ─┤   Scripts  │ LangExtract│   (Markdown)   ─→ Quartz Site
 arXiv papers  ─┤            └────────────┘                ─→ Notion Tasks
 Clipboard     ─┘                  │                       ─→ Gmail Drafts
-                                  ↓                       ─→ Calendar Links
-                           Claude Code
-                           (Orchestration)
+Audio files   ─┐                  ↓                       ─→ Calendar Links
+              ─┴─→ Diarize ─→ Claude Code
+                             (Orchestration)
+```
+
+## Unified Inbox Processing
+
+Drop any file into `_inbox/` and the system auto-detects and routes:
+
+```bash
+# Process all files in inbox
+python scripts/process_inbox.py
+
+# Watch for new files
+python scripts/process_inbox.py --watch
+
+# Preview what would happen
+python scripts/process_inbox.py --dry-run
+```
+
+Supported file types:
+- **PDFs** → `_inbox/papers/`
+- **URLs** (`.url`, `.txt` with links) → `_inbox/articles/`
+- **arXiv/DOI** (in `.txt`) → `_inbox/papers/`
+- **Markdown** → Routed by content type
+- **Images** → `_inbox/clippings/`
+
+## Entity to Knowledge Base
+
+Extract entities and create markdown profiles automatically:
+
+```bash
+# From a meeting file
+python scripts/entities_to_kb.py --from-file meeting.md
+
+# Batch process a folder
+python scripts/entities_to_kb.py --batch _inbox/meetings/
+```
+
+This creates:
+- `people/Name.md` - Person profiles with contact info and mentions
+- `organizations/Name.md` - Organization profiles
+- `concepts/Term.md` - Concept definitions with examples
+
+## Speaker Diarization
+
+Process audio files with speaker identification:
+
+```bash
+# Basic diarization
+python scripts/diarize_audio.py recording.mp3
+
+# With known speaker names
+python scripts/diarize_audio.py meeting.mp3 --speakers "Alice,Bob" --num-speakers 2
+
+# Output as subtitles
+python scripts/diarize_audio.py interview.wav --format srt
+```
+
+Requirements:
+- `pip install pyannote.audio openai-whisper torch`
+- Hugging Face token (set `HF_TOKEN` env var)
+
+## Task Management
+
+Central task dashboard at `tasks.md` with Dataview queries:
+
+- View all open tasks across the vault
+- Filter by project or person
+- Track tasks from meetings
+- See recently completed items
+
+Sync tasks to person profiles:
+```bash
+python scripts/sync_tasks.py --all-meetings
+```
+
+## Version Control
+
+Use `/save` to create detailed commits:
+
+```
+/save after weekly planning sessions
+```
+
+Creates commits like:
+```
+[Knowledge]: Add OpenCivics meetings and new contact
+
+Changes:
+- meetings/2024-01-07-opencivics-planning.md (new)
+- people/Jane Smith.md (new)
+
+Stats:
+- 2 new meeting notes
+- 1 new person profile
 ```
