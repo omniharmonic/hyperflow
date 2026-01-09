@@ -42,9 +42,11 @@ except ImportError:
 try:
     from rich.console import Console
     from rich.table import Table
+    from rich.markup import escape as rich_escape
     RICH_AVAILABLE = True
     console = Console()
 except ImportError:
+    rich_escape = lambda x: x  # Fallback if rich not available
     RICH_AVAILABLE = False
     console = None
 
@@ -130,11 +132,17 @@ class RegexExtractor:
         'transformer library', 'attention mechanism', 'related work',
         # Common verb phrases that look like names
         'will do', 'and alex', 'and also', 'should also', 'can you',
+        # Verb-starting phrases (Called X, Asked Y, etc.)
+        'called lisa', 'called john', 'asked sarah', 'spoke with',
     }
+
+    # Common speaker placeholders to filter out
+    SPEAKER_PLACEHOLDERS = {'user', 'me', 'host', 'speaker', 'moderator',
+                            'participant', 'attendee', 'guest', 'unknown'}
 
     # Patterns that look like names but aren't (common sentence starters)
     FALSE_NAME_PATTERNS = re.compile(
-        r'^(Thanks?|Hello|Hi|Hey|Dear|Good|Great|Nice|Sure|Yes|No|Ok)\s+[A-Z]',
+        r'^(Thanks?|Hello|Hi|Hey|Dear|Good|Great|Nice|Sure|Yes|No|Ok|Called|Asked|Spoke)\s+[A-Z]',
         re.IGNORECASE
     )
 
@@ -154,7 +162,9 @@ class RegexExtractor:
             for match in pattern.finditer(text):
                 name = match.group(1).strip()
                 if name and len(name) > 1:
-                    speakers.add(name)
+                    # Filter out placeholder speakers
+                    if name.lower() not in self.SPEAKER_PLACEHOLDERS:
+                        speakers.add(name)
 
         for speaker in speakers:
             entities['people'].append(Entity(
@@ -342,7 +352,7 @@ JSON (array of concepts):"""
 class HyperflowExtractor:
     """Main extractor combining spaCy and Ollama for hybrid extraction."""
 
-    def __init__(self, model: str = "llama3.2", use_deep: bool = False):
+    def __init__(self, model: str = "llama3.2", use_deep: bool = False, vault_path: Path = None):
         # Try spaCy first, fall back to regex if unavailable
         self.spacy_extractor = None
         self.regex_extractor = None
@@ -359,6 +369,16 @@ class HyperflowExtractor:
 
         self.ollama_extractor = OllamaExtractor(model) if (use_deep and OLLAMA_AVAILABLE) else None
         self.use_deep = use_deep
+
+        # Initialize entity registry if vault path provided
+        self.registry = None
+        if vault_path:
+            try:
+                from entity_registry import EntityRegistry
+                self.registry = EntityRegistry(vault_path)
+                self.registry.scan()
+            except ImportError:
+                pass
 
     def extract(self, text: str, domain: str = "general") -> ExtractionResult:
         """Extract all entities from text."""
@@ -407,22 +427,62 @@ class HyperflowExtractor:
         return result
 
     def _generate_link_suggestions(self, result: ExtractionResult) -> list[str]:
-        """Generate wiki-link suggestions based on extracted entities."""
-        suggestions = []
+        """Generate wiki-link suggestions based on extracted entities.
 
-        # People → [[people/Name]]
+        Uses entity registry to provide correct links for existing entities
+        and marks new entities that would be created.
+        """
+        suggestions = []
+        seen = set()
+
+        # People → [[people/Name]] or existing link
         for person in result.people:
             name = person.text.strip()
-            if len(name.split()) >= 2:  # Full names only
+            if not name or name.lower() in seen:
+                continue
+            seen.add(name.lower())
+
+            if self.registry:
+                match = self.registry.find_person(name)
+                if match:
+                    # Entity exists - use exact link
+                    suggestions.append(f"[[people/{match.name}]]")
+                elif len(name.split()) >= 2:  # New entity - full names only
+                    suggestions.append(f"[[people/{name}]] (new)")
+            elif len(name.split()) >= 2:
                 suggestions.append(f"[[people/{name}]]")
 
         # Organizations → [[organizations/Name]]
         for org in result.organizations:
-            suggestions.append(f"[[organizations/{org.text}]]")
+            name = org.text.strip()
+            if not name or name.lower() in seen:
+                continue
+            seen.add(name.lower())
+
+            if self.registry:
+                match = self.registry.find_organization(name)
+                if match:
+                    suggestions.append(f"[[organizations/{match.name}]]")
+                else:
+                    suggestions.append(f"[[organizations/{name}]] (new)")
+            else:
+                suggestions.append(f"[[organizations/{name}]]")
 
         # Concepts → [[concepts/Term]]
         for concept in result.concepts:
-            suggestions.append(f"[[concepts/{concept.text}]]")
+            name = concept.text.strip()
+            if not name or name.lower() in seen:
+                continue
+            seen.add(name.lower())
+
+            if self.registry:
+                match = self.registry.find_concept(name)
+                if match:
+                    suggestions.append(f"[[concepts/{match.name}]]")
+                else:
+                    suggestions.append(f"[[concepts/{name}]] (new)")
+            else:
+                suggestions.append(f"[[concepts/{name}]]")
 
         return suggestions[:15]  # Limit to 15 suggestions
 
@@ -574,8 +634,10 @@ def extract_tasks_regex(text: str) -> list[dict]:
 @click.option('--model', '-m', default='llama3.2', help='Ollama model for deep extraction')
 @click.option('--format', '-f', 'output_format', type=click.Choice(['json', 'table', 'markdown']),
               default='json', help='Output format')
+@click.option('--vault', '-v', type=click.Path(exists=True),
+              help='Vault path for entity registry lookup')
 def main(input_path: str, output: Optional[str], recursive: bool, domain: str,
-         deep: bool, model: str, output_format: str):
+         deep: bool, model: str, output_format: str, vault: Optional[str]):
     """Extract entities from markdown files.
 
     INPUT_PATH can be a single file or directory.
@@ -587,9 +649,12 @@ def main(input_path: str, output: Optional[str], recursive: bool, domain: str,
     """
     input_path = Path(input_path)
 
-    # Initialize extractor
+    # Determine vault path (default to script's parent directory)
+    vault_path = Path(vault) if vault else Path(__file__).parent.parent
+
+    # Initialize extractor with registry
     try:
-        extractor = HyperflowExtractor(model=model, use_deep=deep)
+        extractor = HyperflowExtractor(model=model, use_deep=deep, vault_path=vault_path)
     except Exception as e:
         click.echo(f"Error initializing extractor: {e}", err=True)
         sys.exit(1)
@@ -653,7 +718,8 @@ def main(input_path: str, output: Optional[str], recursive: bool, domain: str,
             if result.suggested_links:
                 console.print("\n[bold]Suggested Links:[/bold]")
                 for link in result.suggested_links[:10]:
-                    console.print(f"  {link}")
+                    # Escape brackets to prevent Rich markup interpretation
+                    console.print(f"  {rich_escape(link)}")
 
     elif output_format == 'markdown':
         for result in results:

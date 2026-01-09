@@ -7,6 +7,7 @@ Converts extracted entities into markdown knowledge base entries:
 - Creates/updates organization profiles in organizations/
 - Creates/updates concept notes in concepts/
 - Links entities back to source documents
+- Uses EntityRegistry to prevent duplicates and link to existing entities
 
 Usage:
     # Process entities from a JSON file
@@ -28,6 +29,13 @@ from typing import Optional
 
 import click
 import yaml
+
+# Import entity registry for deduplication
+try:
+    from entity_registry import EntityRegistry, NameNormalizer
+    REGISTRY_AVAILABLE = True
+except ImportError:
+    REGISTRY_AVAILABLE = False
 
 
 def slugify(text: str) -> str:
@@ -68,6 +76,15 @@ class KnowledgeBaseWriter:
         # Ensure directories exist
         for d in [self.people_dir, self.orgs_dir, self.concepts_dir]:
             d.mkdir(parents=True, exist_ok=True)
+
+        # Initialize entity registry for deduplication
+        self.registry = None
+        if REGISTRY_AVAILABLE:
+            self.registry = EntityRegistry(vault_path)
+            self.registry.scan()
+            click.echo(f"Entity registry loaded: {len(self.registry.get_all_people())} people, "
+                      f"{len(self.registry.get_all_organizations())} orgs, "
+                      f"{len(self.registry.get_all_concepts())} concepts")
 
     def process_extraction(self, extraction: dict, source_file: Optional[str] = None) -> dict:
         """Process extraction results and create/update KB entries."""
@@ -132,22 +149,24 @@ class KnowledgeBaseWriter:
     def create_or_update_person(self, name: str, source_link: Optional[str] = None) -> bool:
         """Create or update a person profile. Returns True if created, False if updated."""
         name = title_case_name(name)
+
+        # Check registry for existing entity (handles name variations)
+        if self.registry:
+            match = self.registry.find_person(name)
+            if match:
+                # Entity exists - update mentions in existing file
+                filepath = match.filepath
+                if source_link:
+                    self._add_mention_to_file(filepath, source_link)
+                return False
+
+        # Fall back to direct file check
         filepath = self.people_dir / f"{name}.md"
 
         if filepath.exists():
             # Update existing - add source to mentions if not present
             if source_link:
-                content = filepath.read_text(encoding='utf-8')
-                if source_link not in content:
-                    # Add to Mentions section
-                    if '## Mentions' in content:
-                        content = content.replace(
-                            '## Mentions\n',
-                            f'## Mentions\n\n- {source_link}\n'
-                        )
-                    else:
-                        content += f"\n## Mentions\n\n- {source_link}\n"
-                    filepath.write_text(content, encoding='utf-8')
+                self._add_mention_to_file(filepath, source_link)
             return False
 
         # Create new profile
@@ -185,24 +204,47 @@ class KnowledgeBaseWriter:
 - [[]]
 """
         filepath.write_text(content, encoding='utf-8')
+
+        # Update registry with new entity
+        if self.registry:
+            self.registry.scan()  # Refresh to include new entity
+
         return True
+
+    def _add_mention_to_file(self, filepath: Path, source_link: str) -> bool:
+        """Add a mention link to an entity file if not already present."""
+        try:
+            content = filepath.read_text(encoding='utf-8')
+            if source_link not in content:
+                if '## Mentions' in content:
+                    content = content.replace(
+                        '## Mentions\n',
+                        f'## Mentions\n\n- {source_link}\n'
+                    )
+                else:
+                    content += f"\n## Mentions\n\n- {source_link}\n"
+                filepath.write_text(content, encoding='utf-8')
+                return True
+        except Exception:
+            pass
+        return False
 
     def create_or_update_org(self, name: str, source_link: Optional[str] = None) -> bool:
         """Create or update an organization profile."""
+        # Check registry for existing entity (handles name variations)
+        if self.registry:
+            match = self.registry.find_organization(name)
+            if match:
+                # Entity exists - update mentions in existing file
+                if source_link:
+                    self._add_mention_to_file(match.filepath, source_link)
+                return False
+
         filepath = self.orgs_dir / f"{name}.md"
 
         if filepath.exists():
             if source_link:
-                content = filepath.read_text(encoding='utf-8')
-                if source_link not in content:
-                    if '## Mentions' in content:
-                        content = content.replace(
-                            '## Mentions\n',
-                            f'## Mentions\n\n- {source_link}\n'
-                        )
-                    else:
-                        content += f"\n## Mentions\n\n- {source_link}\n"
-                    filepath.write_text(content, encoding='utf-8')
+                self._add_mention_to_file(filepath, source_link)
             return False
 
         frontmatter = {
@@ -241,25 +283,30 @@ class KnowledgeBaseWriter:
 - [[]]
 """
         filepath.write_text(content, encoding='utf-8')
+
+        # Update registry with new entity
+        if self.registry:
+            self.registry.scan()
+
         return True
 
     def create_or_update_concept(self, name: str, definition: str = '',
                                   source_link: Optional[str] = None) -> bool:
         """Create or update a concept note."""
+        # Check registry for existing entity (handles name variations)
+        if self.registry:
+            match = self.registry.find_concept(name)
+            if match:
+                # Entity exists - update mentions in existing file
+                if source_link:
+                    self._add_mention_to_file(match.filepath, source_link)
+                return False
+
         filepath = self.concepts_dir / f"{name}.md"
 
         if filepath.exists():
             if source_link:
-                content = filepath.read_text(encoding='utf-8')
-                if source_link not in content:
-                    if '## Mentions' in content:
-                        content = content.replace(
-                            '## Mentions\n',
-                            f'## Mentions\n\n- {source_link}\n'
-                        )
-                    else:
-                        content += f"\n## Mentions\n\n- {source_link}\n"
-                    filepath.write_text(content, encoding='utf-8')
+                self._add_mention_to_file(filepath, source_link)
             return False
 
         frontmatter = {
@@ -292,7 +339,18 @@ class KnowledgeBaseWriter:
 - [[]]
 """
         filepath.write_text(content, encoding='utf-8')
+
+        # Update registry with new entity
+        if self.registry:
+            self.registry.scan()
+
         return True
+
+    def get_wiki_link(self, name: str, entity_type: str = None) -> Optional[str]:
+        """Get wiki-link for an entity if it exists."""
+        if self.registry:
+            return self.registry.get_link(name, entity_type)
+        return None
 
 
 def run_entity_extraction(filepath: Path, vault_path: Path) -> Optional[dict]:
